@@ -162,6 +162,37 @@
   .progress-card .pnote { color: var(--ink-faint); font-size: 10px; margin-top: 9px; }
   .ds-item.selected { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(217,164,91,.55); }
 
+
+  .result-pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: linear-gradient(180deg, rgba(35,44,56,.92), rgba(15,20,25,.72));
+    border: 1px solid var(--line-bright);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 11px 13px;
+    margin-top: 4px;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  .entry .ehead::before {
+    content: '◆ ';
+    color: var(--accent);
+  }
+  .entry .interp {
+    background: rgba(107,191,123,.08);
+    border: 1px solid rgba(107,191,123,.22);
+    border-left: 4px solid var(--green);
+    border-radius: 7px;
+    padding: 9px 11px;
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+  }
+
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -225,35 +256,90 @@ async function getSchema() {
 const OPENAI_MODEL = 'gpt-5.4-mini';
 const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
 
-const SYSTEM_PROMPT = `You convert a user's natural-language data-analysis request into runnable R code.
+const SYSTEM_PROMPT = `You are Vibestats, an intelligent natural-language-to-R statistical analysis planner.
 Output ONLY one JSON object, no prose:
 {"code":"<R code, newlines as \\n>","summary":"<one-line restatement of what the user asked, in English>","formula":"<the statistical model/operation as a math formula in plain text, or empty string if not applicable>"}
+
 Execution environment:
-- Code runs inside an environment holding the datasets. Refer to a dataset by its name as a variable (e.g. lm(y ~ x, data=df)).
-- Create a new dataset by assigning to a new name (e.g. sub <- subset(df, x1>0)); it is auto-registered.
+- Code runs inside an environment holding the datasets. Refer to a dataset by its name as a variable, e.g. lm(y ~ x, data=mydata).
+- Create a new dataset by assigning a data.frame to a clear new name, e.g. filtered_data <- subset(mydata, x > 0).
 - If the user asks to create/filter/mutate/merge a dataset, assign the data.frame to a clear new dataset name instead of printing rows.
-- Plots are auto-captured and shown as images. Use plot/hist/etc freely.
-- base/stats/utils work directly. For gmm, plm, nlme, sandwich, etc., call library(pkg) at the top (auto-installed if missing).
-- For time series, consider diff/log transforms so the series is stationary when needed.
+- Plots are auto-captured and shown as images. Use plot/hist/boxplot/pairs/plot(model) freely.
+- base/stats/utils are available. For gmm, plm, nlme, sandwich, etc., call library(pkg) at the top; missing packages may be auto-installed.
+- For time series prices, prefer returns/differences when appropriate, e.g. diff(log(price)).
+- Never invent dataset or column names. Use only the real names in Current datasets.
+
 Current datasets:
 {schema}
-Rules:
-- Put statistical summaries, model summaries, numbers, tables, or plot-related output into a variable named result.
-- If result is a raw data.frame, it will be saved as a dataset and not printed in the Results pane.
-- For the formula field: give the actual model, e.g. "y = β0 + β1·x1 + β2·x2 + ε" for regression, "Δlog(P_t) = φ1·Δlog(P_{t-1}) + ε_t" for AR on returns, "" for plain describe/plot/summary.
-- Never invent column names. Use only the real columns above. 'df','x1','y' are placeholders.
+
+Previous analysis context:
+{context}
+
+Intent and follow-up rules:
+- Decide whether the request is a NEW analysis, a FOLLOW-UP explanation, or an EXPANDED analysis.
+- Korean phrases such as "더 자세히", "더 상세히", "상세한", "자세한", "추가로", "진단", "해석", "좀 더", "깊게", "보고서처럼" usually mean the user wants a richer follow-up, not the exact same code.
+- English phrases such as "more detailed", "expand", "deeper", "diagnostics", "explain more", "full result" also mean expanded analysis.
+- If a follow-up asks for more detail about the previous model/result, do NOT repeat exactly the same R code. Reuse and extend the previous analysis.
+- If a follow-up asks for explanation only, create R code only when additional numbers are needed; otherwise produce a small result object containing a plain-language-ready summary from existing available objects if possible.
+- If the previous code contains a model object or lm/glm/arima/test, expand it with additional tables, intervals, diagnostics, and plots.
+
+Default output quality:
+- Prefer a polished, moderately detailed result rather than a minimal summary().
+- Put useful analysis output into a variable named result.
+- For statistical analysis, make result a named list of clean tables/values with human-readable names.
+- Round numeric tables to a sensible number of digits when useful.
+- If result is a raw data.frame, the app will save it as a dataset and not print all rows.
+
+Regression defaults:
+- Do NOT use only result <- summary(m) unless the user explicitly asks for a very simple result.
+- For lm() regression, by default include:
+  1) coefficient table with Estimate, Std.Error, t.value, p.value
+  2) 95% confidence intervals
+  3) R-squared, adjusted R-squared, F-statistic, model p-value
+  4) residual standard error and sample size
+  5) ANOVA table when useful
+  6) residual diagnostics: min/median/max residuals and standardized residual range
+  7) diagnostic plots: plot(m), unless the user asked for no plots
+- Use base R code so it works in WebR.
+
+Other common defaults:
+- For group comparisons, include group means/counts, test statistic, p-value, confidence interval when available, and a simple plot.
+- For correlation, include correlation coefficient, p-value, confidence interval if available, sample size, and scatter plot when appropriate.
+- For summary statistics, include n, mean, sd, min, median, max, and missing count for numeric columns.
+- For plots, choose informative axis labels and titles.
+
+Formula field:
+- For regression: "y = β0 + β1·x1 + β2·x2 + ε"
+- For AR on returns: "Δlog(P_t) = φ1·Δlog(P_{t-1}) + ε_t"
+- For tests/correlations: provide the relevant hypothesis or statistic in plain formula form.
+- For plain data manipulation, use "".
+
 Examples:
 input:"regress y on x1 x2 in df"
-output:{"code":"m <- lm(y ~ x1 + x2, data=df)\\nresult <- summary(m)","summary":"OLS regression of y on x1 and x2 in df.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}
-input:"scatter plot of x vs y"
-output:{"code":"plot(df$x, df$y, pch=19, xlab=\\"x\\", ylab=\\"y\\")","summary":"Scatter plot of x against y.","formula":""}
-input:"summary statistics"
-output:{"code":"result <- summary(df)","summary":"Summary statistics of df.","formula":""}`;
+output:{"code":"m <- lm(y ~ x1 + x2, data=df)\\ns <- summary(m)\\ncoef_table <- as.data.frame(s$coefficients)\\ncoef_table$term <- rownames(coef_table)\\nrownames(coef_table) <- NULL\\nnames(coef_table) <- c('estimate','std_error','t_value','p_value','term')\\nci <- as.data.frame(confint(m))\\nci$term <- rownames(ci)\\nrownames(ci) <- NULL\\nnames(ci) <- c('ci_low','ci_high','term')\\nmodel_fit <- data.frame(r_squared=s$r.squared, adj_r_squared=s$adj.r.squared, residual_se=s$sigma, n=nobs(m), f_statistic=unname(s$fstatistic[1]), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\\npar(mfrow=c(2,2))\\nplot(m)\\nresult <- list(coefficients=round(coef_table,4), confidence_intervals=round(ci,4), model_fit=round(model_fit,4), anova=anova(m))","summary":"Detailed OLS regression of y on x1 and x2 in df.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}
+input:"더 상세한 회귀분석 결과를 알려줘"
+output:{"code":"# Reuse the previous regression idea and expand the output; replace variables with the actual previous model variables.\\nm <- lm(y ~ x1 + x2, data=df)\\ns <- summary(m)\\ncoef_table <- as.data.frame(s$coefficients)\\ncoef_table$term <- rownames(coef_table)\\nrownames(coef_table) <- NULL\\nnames(coef_table) <- c('estimate','std_error','t_value','p_value','term')\\nci <- as.data.frame(confint(m))\\nci$term <- rownames(ci)\\nrownames(ci) <- NULL\\nnames(ci) <- c('ci_low','ci_high','term')\\nmodel_fit <- data.frame(r_squared=s$r.squared, adj_r_squared=s$adj.r.squared, residual_se=s$sigma, n=nobs(m), f_statistic=unname(s$fstatistic[1]), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\\nresid_diag <- data.frame(min_resid=min(resid(m)), median_resid=median(resid(m)), max_resid=max(resid(m)), min_std_resid=min(rstandard(m)), max_std_resid=max(rstandard(m)))\\npar(mfrow=c(2,2))\\nplot(m)\\nresult <- list(coefficients=round(coef_table,4), confidence_intervals=round(ci,4), model_fit=round(model_fit,4), residual_diagnostics=round(resid_diag,4), anova=anova(m))","summary":"Expanded detailed regression output with fit statistics, confidence intervals, ANOVA, and diagnostics.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}`;
 
 function formatSchema(s) {
   const k = Object.keys(s);
   if (!k.length) return '(none)';
   return k.map(n => `- ${n}: columns=${JSON.stringify(s[n].columns)}, shape=${JSON.stringify(s[n].shape)}`).join('\n');
+}
+
+function formatLastContext(ctx) {
+  if (!ctx) return '(none)';
+  const result = (ctx.resultText || '').toString().slice(0, 2500);
+  return [
+    `Previous user/task summary: ${ctx.summary || '(none)'}`,
+    `Previous R code:\n${ctx.code || '(none)'}`,
+    `Previous formula: ${ctx.formula || '(none)'}`,
+    `Previous result excerpt:\n${result || '(no printed result; maybe a plot or dataset was created)'}`,
+    `Previous saved/created dataset: ${ctx.savedDataset || ctx.newDataset || '(none)'}`
+  ].join('\n\n');
+}
+
+function looksLikeFollowUp(text) {
+  return /(더\s*(자세|상세|많이|깊게)|자세한|상세한|추가|진단|해석|보고서|좀\s*더|more detailed|more detail|expand|deeper|diagnostic|explain more|full result)/i.test(text || '');
 }
 async function callLLM(messages, jsonMode) {
   const body = { model:OPENAI_MODEL, messages };
@@ -265,10 +351,18 @@ async function callLLM(messages, jsonMode) {
   const data = await resp.json();
   return data?.choices?.[0]?.message?.content ?? data?.content ?? data?.message ?? '';
 }
-async function parseNL(text) {
+async function parseNL(text, lastContext=null) {
   text = text.trim(); if (!text) throw new Error('Empty input');
   const schema = await getSchema();
-  const prompt = SYSTEM_PROMPT.replace('{schema}', formatSchema(schema)) + `\nUser input: ${text}\nJSON:`;
+  const contextText = formatLastContext(lastContext);
+  const followHint = looksLikeFollowUp(text) && lastContext
+    ? '\nIMPORTANT: This looks like a follow-up request. Use the previous analysis context and expand it. Do not repeat the exact same code unless there is no reasonable alternative.'
+    : '';
+  const prompt = SYSTEM_PROMPT
+    .replace('{schema}', formatSchema(schema))
+    .replace('{context}', contextText)
+    + followHint
+    + `\nUser input: ${text}\nJSON:`;
   const raw = await callLLM([{role:'user',content:prompt}], true);
   let d; try { d = JSON.parse(raw); } catch(e){ throw new Error('Failed to parse LLM JSON response'); }
   if (!d.code) throw new Error("Missing 'code' field");
@@ -575,7 +669,7 @@ function StreamPane({ entries, kind, onInterpret, onSaveResult }) {
     entries.map(en => h('div', { key:en.id, className:'entry'+(en.error?' err':'') },
       h('div', { className:'ehead' }, en.head),
       en.plot && h('img', { src:en.plot }),
-      en.text && h('span', null, en.text),
+      en.text && (kind==='result' ? h('pre', { className:'result-pre' }, en.text) : h('span', null, en.text)),
       kind==='result' && !en.error && (en.text||en.plot) &&
         h('div', { className:'entry-actions' },
           onInterpret && (en.interp ? h('div',{className:'interp'}, en.interp)
@@ -601,6 +695,7 @@ function App() {
   };
   const [resultEntries, setResultEntries] = useState([initialWelcome]);
   const [logEntries, setLogEntries] = useState([initialWelcome]);
+  const [lastRunContext, setLastRunContext] = useState(null);
   // ============================================================
 
   const [modal, setModal] = useState(null);
@@ -672,7 +767,7 @@ function App() {
   async function onInterpretPrompt() {
     const text = promptRef.current.value.trim(); if (!text) return;
     setBusy(true); setParseErr(''); showProgress('Generating R code…', 35, '데이터 값은 보내지 않고 데이터셋/컬럼 구조만 사용합니다.');
-    try { const a = await parseNL(text); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||''); }
+    try { const a = await parseNL(text, lastRunContext); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||''); }
     catch(e){ setParseErr(e.message||String(e)); }
     hideProgress(); setBusy(false);
   }
@@ -757,6 +852,18 @@ function App() {
       pushLog({ head: ts, text: res.consoleText.trim() });
     } else if (!((res.resultText&&res.resultText.trim())||res.plot) && !res.savedDataset) {
       pushLog({ head: ts, text: '(no output)' });
+    }
+    if (!res.error) {
+      setLastRunContext({
+        summary: head,
+        code,
+        formula,
+        resultText: res.resultText || '',
+        consoleText: res.consoleText || '',
+        plot: !!res.plot,
+        savedDataset: res.savedDataset || '',
+        newDataset: res.newDataset || ''
+      });
     }
   }
 
@@ -889,6 +996,7 @@ function App() {
     // =======================================
     
     setActiveId(null);
+    setLastRunContext(null);
   }
   function importProjectClick(){ projRef.current.click(); }
   async function onImportProject(e) {
