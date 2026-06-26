@@ -282,6 +282,80 @@
   .code-btns .run.action-btn { background: linear-gradient(180deg, var(--panel-2), var(--panel)) !important; }
   .code-btns .runblock.action-btn { background: linear-gradient(135deg, var(--accent-dim), var(--panel-2)) !important; border-color: var(--accent) !important; }
 
+
+  .result-html {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .result-card, .notice-card, .error-card {
+    background: var(--result-card-bg);
+    border: 1px solid var(--line-bright);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: var(--result-card-shadow);
+  }
+  .notice-card { border-left-color: var(--amber); color: var(--ink); }
+  .error-card { border-left-color: var(--red); color: var(--ink); }
+  .result-card-title {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--font-scale));
+    color: var(--accent);
+    font-weight: 800;
+    letter-spacing: .4px;
+    margin-bottom: 8px;
+  }
+  .result-table-wrap {
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--panel) 84%, var(--bg));
+  }
+  table.result-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-family: var(--mono);
+    font-size: calc(12px * var(--font-scale));
+  }
+  table.result-table th, table.result-table td {
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    white-space: nowrap;
+    vertical-align: top;
+  }
+  table.result-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--panel-2);
+    color: var(--ink-dim);
+    text-align: left;
+    font-weight: 800;
+  }
+  table.result-table td { color: var(--ink); text-align: right; }
+  table.result-table td:first-child, table.result-table th:first-child { text-align: left; }
+  table.result-table tr:last-child td { border-bottom: none; }
+  table.result-table th:last-child, table.result-table td:last-child { border-right: none; }
+  .technical-log {
+    margin-top: 8px;
+    background: color-mix(in srgb, var(--panel-2) 70%, var(--bg));
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .technical-log summary { cursor: pointer; color: var(--ink-dim); font-family: var(--mono); font-weight: 700; }
+  .technical-log pre {
+    margin-top: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--ink);
+    font-family: var(--mono);
+  }
+
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -516,34 +590,82 @@ async function executeR(code) {
   if (file.exists(.plotfile)) file.remove(.plotfile)
   grDevices::png(.plotfile, width=720, height=480, res=96)
   .console <- capture.output({
-    eval(parse(text="${escaped}"), envir=.env)
+    .eval_out <- withVisible(eval(parse(text="${escaped}"), envir=.env))
     if (exists("result", envir=.env, inherits=FALSE)) result <- get("result", envir=.env)
+    else if (isTRUE(.eval_out$visible)) result <- .eval_out$value
   })
   try(grDevices::dev.off(), silent=TRUE)
   if (exists("result", envir=.env, inherits=FALSE)) { result <- get("result", envir=.env); rm("result", envir=.env) }
-  .resultText <- ""; .consoleText <- paste(.console, collapse="\\n"); .savedName <- ""; .resultKey <- ""
+  .resultText <- ""; .resultHtml <- ""; .consoleText <- paste(.console, collapse="\\n"); .savedNames <- character(0); .resultKey <- ""
   .next_name <- function(prefix) { n <- prefix; i <- 1L; while (exists(n, envir=.env, inherits=FALSE)) { i <- i + 1L; n <- paste0(prefix, i) }; n }
-    .as_saved_df <- function(x, printed) {
-    if (is.data.frame(x)) return(x)
-    if (is.matrix(x) || is.table(x)) return(as.data.frame(x))
-    if (is.atomic(x) && length(x) > 100L) return(data.frame(value=as.vector(x), check.names=FALSE))
-    data.frame(line=printed, stringsAsFactors=FALSE)
+  .esc_html <- function(x) {
+    x <- as.character(x); x[is.na(x)] <- ""
+    x <- gsub("&", "&amp;", x, fixed=TRUE)
+    x <- gsub("<", "&lt;", x, fixed=TRUE)
+    x <- gsub(">", "&gt;", x, fixed=TRUE)
+    x <- gsub('"', "&quot;", x, fixed=TRUE)
+    x
+  }
+  .fmt <- function(x) {
+    if (is.numeric(x)) return(ifelse(is.na(x), "", format(round(x, 6), trim=TRUE, scientific=FALSE)))
+    if (inherits(x, "Date") || inherits(x, "POSIXt")) return(as.character(x))
+    as.character(x)
+  }
+  .save_df <- function(d, prefix="result_dataset") {
+    nm <- .next_name(prefix)
+    assign(nm, as.data.frame(d), envir=.env)
+    .savedNames <<- c(.savedNames, nm)
+    nm
+  }
+  .table_html <- function(d, title="Result") {
+    d <- as.data.frame(d, stringsAsFactors=FALSE, check.names=FALSE)
+    if (nrow(d) > 100L) { .save_df(d); return("") }
+    if (ncol(d) == 0L) return("")
+    dd <- d
+    for (j in seq_along(dd)) dd[[j]] <- .fmt(dd[[j]])
+    rn <- rownames(d)
+    if (!is.null(rn) && length(rn) == nrow(d) && !identical(rn, as.character(seq_len(nrow(d))))) {
+      dd <- data.frame(row=rn, dd, check.names=FALSE)
+    }
+    th <- paste0("<th>", .esc_html(names(dd)), "</th>", collapse="")
+    rows <- character(0)
+    if (nrow(dd) > 0L) {
+      rows <- vapply(seq_len(nrow(dd)), function(i) {
+        vals <- vapply(dd[i, , drop=FALSE], function(z) .esc_html(z[[1]]), character(1))
+        paste0("<tr>", paste0("<td>", vals, "</td>", collapse=""), "</tr>")
+      }, character(1))
+    }
+    paste0("<section class='result-card'><div class='result-card-title'>", .esc_html(title), "</div><div class='result-table-wrap'><table class='result-table'><thead><tr>", th, "</tr></thead><tbody>", paste(rows, collapse=""), "</tbody></table></div></section>")
+  }
+  .scalar_html <- function(x, title="Result") {
+    val <- paste(.esc_html(capture.output(print(x))), collapse="<br>")
+    paste0("<section class='result-card'><div class='result-card-title'>", .esc_html(title), "</div><div>", val, "</div></section>")
+  }
+  .obj_html <- function(x, title="Result", depth=0L) {
+    if (is.data.frame(x)) return(.table_html(x, title))
+    if (is.matrix(x) || is.table(x)) return(.table_html(as.data.frame(x), title))
+    if (is.atomic(x) && length(x) > 1L && length(x) <= 100L) return(.table_html(data.frame(value=x, check.names=FALSE), title))
+    if (is.atomic(x) && length(x) > 100L) { .save_df(data.frame(value=as.vector(x), check.names=FALSE)); return("") }
+    if (is.list(x) && !inherits(x, "lm") && !inherits(x, "glm") && depth < 2L) {
+      nms <- names(x); if (is.null(nms)) nms <- paste0("Item ", seq_along(x)); nms[nms==""] <- paste0("Item ", which(nms==""))
+      parts <- character(0)
+      for (i in seq_along(x)) parts <- c(parts, .obj_html(x[[i]], nms[i], depth+1L))
+      parts <- parts[nzchar(parts)]
+      if (length(parts)) return(paste(parts, collapse=""))
+    }
+    .scalar_html(x, title)
   }
   if (!is.null(result)) {
     .printed <- capture.output(print(result))
     .lineCount <- length(.printed)
-    if (is.data.frame(result) || .lineCount > 100L) {
-      .savedName <- .next_name("result_dataset")
-      assign(.savedName, .as_saved_df(result, .printed), envir=.env)
-      .resultText <- ""
-      .consoleText <- paste(c(.consoleText, paste0("Large/raw result saved as dataset '", .savedName, "' instead of printing in Results.")), collapse="\n")
-    } else {
+    .resultHtml <- .obj_html(result, "Result")
+    if (!length(.savedNames)) {
       assign(${JSON.stringify(resultKey)}, result, envir=.env)
       .resultKey <- ${JSON.stringify(resultKey)}
-      .resultText <- paste(.printed, collapse="\n")
     }
+    if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
   }
-  paste0("__RESULT__", .resultText, "__CONSOLE__", .consoleText, "__SAVED__", .savedName, "__RKEY__", .resultKey)
+  paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__SAVED__", paste(.savedNames, collapse=","), "__RKEY__", .resultKey)
 }
 .vibestats_out <- tryCatch(.vibestats_run(), error=function(e) paste0("__ERR__", conditionMessage(e)))
 .vibestats_out
@@ -563,10 +685,11 @@ async function executeR(code) {
       }
       throw new Error('R execution error: ' + msg);
     }
-    let resultText = '', consoleText = '', savedDataset = '', resultKeyOut = '';
-    const ri = out.indexOf('__RESULT__'), ci = out.indexOf('__CONSOLE__'), si = out.indexOf('__SAVED__'), ki = out.indexOf('__RKEY__');
-    if (ri>=0 && ci>=0 && si>=0 && ki>=0) {
-      resultText = out.slice(ri+10, ci);
+    let resultText = '', resultHtml = '', consoleText = '', savedDataset = '', resultKeyOut = '';
+    const ri = out.indexOf('__RESULT__'), hi = out.indexOf('__HTML__'), ci = out.indexOf('__CONSOLE__'), si = out.indexOf('__SAVED__'), ki = out.indexOf('__RKEY__');
+    if (ri>=0 && hi>=0 && ci>=0 && si>=0 && ki>=0) {
+      resultText = out.slice(ri+10, hi);
+      resultHtml = out.slice(hi+8, ci);
       consoleText = out.slice(ci+11, si);
       savedDataset = out.slice(si+9, ki);
       resultKeyOut = out.slice(ki+8);
@@ -578,7 +701,7 @@ async function executeR(code) {
     await getSchema();
     const after = Object.keys(window._dsCache||{});
     const newOnes = after.filter(n=>!before.has(n));
-    return { resultText, consoleText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
+    return { resultText, resultHtml, consoleText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
   }
   throw new Error('R execution error: still failing after package install');
 }
@@ -763,13 +886,18 @@ function StreamPane({ entries, kind, onInterpret, onSaveResult }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [entries.length]);
   if (!entries.length) return h('div', { className:'stream', ref },
-    h('span', { className:'placeholder' }, kind==='result' ? 'Analysis results will accumulate here.' : 'Console output and errors will accumulate here.'));
+    h('span', { className:'placeholder' }, 'Analysis results and system messages will accumulate here.'));
   return h('div', { className:'stream', ref },
-    entries.map(en => h('div', { key:en.id, className:'entry'+(en.error?' err':'') },
+    entries.map(en => h('div', { key:en.id, className:'entry'+(en.error?' err':'')+(en.system?' system':'') },
       h('div', { className:'ehead' }, en.head),
       en.plot && h('img', { src:en.plot }),
-      en.text && (kind==='result' ? h('pre', { className:'result-pre' }, en.text) : h('span', null, en.text)),
-      kind==='result' && !en.error && (en.text||en.plot) &&
+      en.html && h('div', { className:'result-html', dangerouslySetInnerHTML:{__html:en.html} }),
+      en.text && (en.system
+        ? h('details', { className: en.error ? 'technical-log error-card' : 'technical-log notice-card', open: !!en.error },
+            h('summary', null, en.error ? 'Error details' : 'System / Log'),
+            h('pre', null, en.text))
+        : h('pre', { className:'result-pre' }, en.text)),
+      kind==='result' && !en.error && !en.system && (en.text||en.html||en.plot) &&
         h('div', { className:'entry-actions' },
           onInterpret && (en.interp ? h('div',{className:'interp'}, en.interp)
             : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? '해석 중…' : 'Interpret')),
@@ -823,7 +951,7 @@ function App() {
   function resetFont() { setFontScale(1); }
 
   function pushResult(en) { setResultEntries(es => [...es, { id:++entryCounter, ...en }]); }
-  function pushLog(en) { setLogEntries(es => [...es, { id:++entryCounter, ...en }]); }
+  function pushLog(en) { setResultEntries(es => [...es, { id:++entryCounter, system:true, ...en }]); }
 
   function showProgress(text, pct=12, note='대용량 데이터나 패키지 설치 상황에 따라 시간이 달라질 수 있습니다.') {
     setProgress({ text, pct, note, started:Date.now() });
@@ -945,22 +1073,31 @@ function App() {
       return;
     }
     if (res.savedDataset) {
-      pushLog({ head: ts + ' — dataset saved', text:`Raw data result was saved as dataset '${res.savedDataset}' and was not printed in Results.` });
+      pushLog({ head: ts + ' — dataset saved', text:`Large/raw result with more than 100 rows was saved as dataset '${res.savedDataset}' and was not printed in Results.` });
     }
     if (res.newDataset && res.newDataset !== res.savedDataset) {
       pushLog({ head: ts + ' — dataset created', text:`New dataset created: '${res.newDataset}'.` });
     }
     const resultLineCount = res.resultText ? res.resultText.split(/\r?\n/).length : 0;
-    if (res.resultText && resultLineCount > 100) {
-      pushLog({ head: ts + ' — large result suppressed', text:'A result with more than 100 lines was not printed in Results. Use Save or assign the output to a dataset to inspect it.' });
-    }
-    if (((res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot)) {
-      pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', plot: res.plot || null,
+    let displayed = false;
+    if (res.resultHtml || (res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot) {
+      pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: res.resultHtml || '', plot: res.plot || null,
                    _code: code, _summary: head, resultKey: res.resultKey || null });
+      displayed = true;
     }
-    if (res.consoleText && res.consoleText.trim()) {
-      pushLog({ head: ts, text: res.consoleText.trim() });
-    } else if (!((res.resultText&&res.resultText.trim())||res.plot) && !res.savedDataset) {
+    if (!displayed && res.consoleText && res.consoleText.trim()) {
+      const consoleLines = res.consoleText.split(/\r?\n/).length;
+      if (consoleLines <= 100) {
+        pushResult({ head: ts + ' — console output', text: res.consoleText.trim(), html:'', plot:null,
+                     _code: code, _summary: head, resultKey: null });
+        displayed = true;
+      } else {
+        pushLog({ head: ts + ' — console output suppressed', text:'Console output had more than 100 lines, so it was not printed. Assign large outputs to a dataset to inspect them.' });
+      }
+    } else if (res.consoleText && res.consoleText.trim()) {
+      pushLog({ head: ts + ' — technical log', text: res.consoleText.trim() });
+    }
+    if (!displayed && !res.savedDataset && !(res.consoleText && res.consoleText.trim())) {
       pushLog({ head: ts, text: '(no output)' });
     }
     if (!res.error) {
@@ -969,6 +1106,7 @@ function App() {
         code,
         formula,
         resultText: res.resultText || '',
+        resultHtml: res.resultHtml || '',
         consoleText: res.consoleText || '',
         plot: !!res.plot,
         savedDataset: res.savedDataset || '',
@@ -1102,7 +1240,6 @@ function App() {
     
     // === INITIALIZE WITH WELCOME MESSAGE ===
     setResultEntries([initialWelcome]); 
-    setLogEntries([initialWelcome]); 
     // =======================================
     
     setActiveId(null);
@@ -1155,7 +1292,6 @@ function App() {
 
   function fullscreen(title, kind) {
     if (kind==='result') setModal({ title, full:true, streamKind:'result', entries:resultEntries });
-    else if (kind==='log') setModal({ title, full:true, streamKind:'log', entries:logEntries });
     else if (kind==='blocks') setModal({ title, full:true, blocksView:true });
   }
 
@@ -1277,7 +1413,7 @@ function App() {
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
 
       h('div', { className:'vsplit', style:{flex:'0 0 360px'} },
-        h('div', { className:'window', style:{flex:'1 1 50%'} },
+        h('div', { className:'window', style:{flex:'1 1 auto'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
             h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — fixed order · drag down for new row'),
             h('span',{className:'grow'}),
@@ -1286,15 +1422,7 @@ function App() {
           h('div', { className:'content' },
             h('div', { className:'blocks-scroll', onMouseDown:beginBlockAreaSelect, onContextMenu:e=>{ if(selectedIds.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'blocks-selected'}); } } },
               blocks.length ? h('div',{className:'blocks-flow'}, renderBlocksFlow(blocks, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds}))
-                : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run + Block".')))),
-        h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v') }),
-        h('div', { className:'window', style:{flex:'1 1 50%'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot',style:{background:'var(--amber)'}}), 'Log',
-            h('span',{className:'grow'}),
-            h('button',{className:'tbtn', title:'Clear', onClick:()=>setLogEntries([])},'🧹'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Log','log')},'⛶')),
-          h('div', { className:'content' },
-            h(StreamPane, { entries:logEntries, kind:'log' })))) ),
+                : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run + Block".'))))) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'') },
