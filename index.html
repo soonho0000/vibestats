@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>nlstat — WebR Statistical Analysis</title>
+<title>Vibestats — WebR Statistical Analysis</title>
 <style>
   :root {
     --bg: #0f1419; --panel: #1a212b; --panel-2: #232c38;
@@ -150,6 +150,18 @@
   .ctx .item:hover { background: var(--panel-2); }
   .ctx .item.danger:hover { background: #3a2424; color: var(--red); }
 
+
+  .entry-actions { display: flex; gap: 6px; margin-top: 5px; }
+  .entry-actions button { flex: 0 0 auto; min-width: 90px; padding: 3px 10px !important; font-size: 11px !important; }
+  .progress-bg { position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,.42); display: flex; align-items: center; justify-content: center; }
+  .progress-card { width: min(440px, 82vw); background: var(--panel); border: 1px solid var(--line-bright); border-radius: 10px; padding: 18px; box-shadow: 0 18px 44px rgba(0,0,0,.55); font-family: var(--mono); }
+  .progress-card .ptitle { color: var(--accent); font-size: 13px; margin-bottom: 9px; }
+  .progress-card .pmsg { color: var(--ink-dim); font-size: 11px; margin-bottom: 12px; line-height: 1.5; }
+  .progress-card .pbar { height: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .progress-card .pbar i { display: block; height: 100%; width: 30%; background: var(--accent); border-radius: 999px; transition: width .25s; }
+  .progress-card .pnote { color: var(--ink-faint); font-size: 10px; margin-top: 9px; }
+  .ds-item.selected { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(217,164,91,.55); }
+
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -168,7 +180,7 @@
 </head>
 <body>
 <div id="boot">
-  <div class="mark">nl<b>stat</b> · <span class="r">WebR</span></div>
+  <div class="mark">Vibe<b>stats</b> · <span class="r">WebR</span></div>
   <div class="bar"><i></i></div>
   <div class="status" id="bootStatus">Initializing…</div>
 </div>
@@ -209,9 +221,12 @@ async function getSchema() {
   return schema;
 }
 
-// ===== LLM (gpt-5.4-nano) =====
-const OPENAI_MODEL = 'gpt-5.4-nano';
-const getKey = () => localStorage.getItem('openai_key') || '';
+// ===== LLM via secure backend proxy =====
+// Browser code no longer stores or sees the OpenAI API key.
+// Change this endpoint if your backend route is different. The backend should keep
+// OPENAI_API_KEY in a server-side environment variable and forward requests to OpenAI.
+const OPENAI_MODEL = 'gpt-5.4-mini';
+const OPENAI_PROXY_URL = 'https://my-proxy.your-subdomain.workers.dev';
 
 const SYSTEM_PROMPT = `You convert a user's natural-language data-analysis request into runnable R code.
 Output ONLY one JSON object, no prose:
@@ -219,13 +234,15 @@ Output ONLY one JSON object, no prose:
 Execution environment:
 - Code runs inside an environment holding the datasets. Refer to a dataset by its name as a variable (e.g. lm(y ~ x, data=df)).
 - Create a new dataset by assigning to a new name (e.g. sub <- subset(df, x1>0)); it is auto-registered.
+- If the user asks to create/filter/mutate/merge a dataset, assign the data.frame to a clear new dataset name instead of printing rows.
 - Plots are auto-captured and shown as images. Use plot/hist/etc freely.
 - base/stats/utils work directly. For gmm, plm, nlme, sandwich, etc., call library(pkg) at the top (auto-installed if missing).
 - For time series, consider diff/log transforms so the series is stationary when needed.
 Current datasets:
 {schema}
 Rules:
-- Put the analysis result into a variable named result (summary/number/table). If only plotting, result may be omitted.
+- Put statistical summaries, model summaries, numbers, tables, or plot-related output into a variable named result.
+- If result is a raw data.frame, it will be saved as a dataset and not printed in the Results pane.
 - For the formula field: give the actual model, e.g. "y = β0 + β1·x1 + β2·x2 + ε" for regression, "Δlog(P_t) = φ1·Δlog(P_{t-1}) + ε_t" for AR on returns, "" for plain describe/plot/summary.
 - Never invent column names. Use only the real columns above. 'df','x1','y' are placeholders.
 Examples:
@@ -242,16 +259,14 @@ function formatSchema(s) {
   return k.map(n => `- ${n}: columns=${JSON.stringify(s[n].columns)}, shape=${JSON.stringify(s[n].shape)}`).join('\n');
 }
 async function callLLM(messages, jsonMode) {
-  const key = getKey();
-  if (!key) throw new Error('No OpenAI API key. Click "API Key" at top-right to set it. (Only column info is sent, never your data values.)');
   const body = { model:OPENAI_MODEL, messages };
   if (jsonMode) body.response_format = { type:'json_object' };
-  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-    method:'POST', headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},
-    body: JSON.stringify(body)
+  const resp = await fetch(OPENAI_PROXY_URL, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
-  if (!resp.ok) throw new Error('OpenAI API call failed: ' + await resp.text());
-  return (await resp.json()).choices[0].message.content;
+  if (!resp.ok) throw new Error('OpenAI proxy call failed: ' + await resp.text());
+  const data = await resp.json();
+  return data?.choices?.[0]?.message?.content ?? data?.content ?? data?.message ?? '';
 }
 async function parseNL(text) {
   text = text.trim(); if (!text) throw new Error('Empty input');
@@ -263,16 +278,49 @@ async function parseNL(text) {
   return { code:String(d.code), summary:String(d.summary || text), formula:String(d.formula || '') };
 }
 
-// Interpret an analysis result in natural language (English)
+async function repairRCode(code, summary, errorText, attempt) {
+  const schema = await getSchema();
+  const msg = [{ role:'user', content:
+`Fix this R code so it runs correctly in the described WebR environment. Return ONLY JSON: {"code":"...","summary":"...","formula":"...","reason":"brief reason"}
+
+Current datasets:
+${formatSchema(schema)}
+
+Original task:
+${summary || '(not provided)'}
+
+Current R code:
+${code}
+
+Error message:
+${errorText}
+
+Attempt number: ${attempt}/5
+Rules:
+- Use only real dataset and column names from the schema.
+- Keep the user's intent.
+- If the user is creating a dataset, assign it to a syntactic dataset name.
+- Put useful analysis output in result; raw data.frame result will be saved as a dataset automatically.` }];
+  const raw = await callLLM(msg, true);
+  let d; try { d = JSON.parse(raw); } catch(e){ throw new Error('Failed to parse repair JSON response'); }
+  if (!d.code) throw new Error('Repair response did not include code.');
+  return { code:String(d.code), summary:String(d.summary || summary || ''), formula:String(d.formula || ''), reason:String(d.reason || '') };
+}
+
+// Interpret an analysis result in very simple natural language (Korean)
 async function interpretResult(summary, code, resultText) {
   const msg = [{ role:'user', content:
-`You are a statistics tutor. Briefly interpret the following R analysis result in clear English (3-6 sentences). Focus on what the numbers mean (significance, direction, magnitude, fit). Do not restate the code.
+`아래 R 통계분석 결과를 통계 비전공자도 이해할 수 있게 한국어로 아주 쉽고 직관적으로 해석해 주세요.
+- 2~4문장만 쓰세요.
+- 어려운 통계용어는 피하고, 꼭 필요하면 쉬운 말로 바꿔 주세요.
+- 숫자의 의미, 증가/감소 방향, 중요한지 여부, 한계만 간단히 말하세요.
+- 코드를 설명하지 마세요.
 
-Task: ${summary}
+분석 목적: ${summary}
 R code:
 ${code}
 
-Result:
+결과:
 ${resultText.slice(0, 4000)}` }];
   return (await callLLM(msg, false)).trim();
 }
@@ -281,10 +329,11 @@ ${resultText.slice(0, 4000)}` }];
 async function executeR(code) {
   const before = new Set(Object.keys(window._dsCache || {}));
   const escaped = code.replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+  const resultKey = '.vibestats_result_' + Date.now() + '_' + Math.floor(Math.random()*100000);
   const wrap = `
-.nlstat_run <- function() {
+.vibestats_run <- function() {
   .env <- .nlstat_env; result <- NULL
-  .plotfile <- "/tmp/__nlstat_plot.png"
+  .plotfile <- "/tmp/__vibestats_plot.png"
   if (file.exists(.plotfile)) file.remove(.plotfile)
   grDevices::png(.plotfile, width=720, height=480, res=96)
   .console <- capture.output({
@@ -293,13 +342,23 @@ async function executeR(code) {
   })
   try(grDevices::dev.off(), silent=TRUE)
   if (exists("result", envir=.env, inherits=FALSE)) { result <- get("result", envir=.env); rm("result", envir=.env) }
-  .resultText <- if (is.null(result)) "" else paste(capture.output(print(result)), collapse="\\n")
-  .consoleText <- paste(.console, collapse="\\n")
-  # return as JSON-ish via marker split
-  paste0("__RESULT__", .resultText, "__CONSOLE__", .consoleText)
+  .resultText <- ""; .consoleText <- paste(.console, collapse="\\n"); .savedName <- ""; .resultKey <- ""
+  .next_name <- function(prefix) { n <- prefix; i <- 1L; while (exists(n, envir=.env, inherits=FALSE)) { i <- i + 1L; n <- paste0(prefix, i) }; n }
+  if (!is.null(result)) {
+    if (is.data.frame(result)) {
+      .savedName <- .next_name("result_dataset")
+      assign(.savedName, result, envir=.env)
+      .resultText <- ""
+    } else {
+      assign(${JSON.stringify(resultKey)}, result, envir=.env)
+      .resultKey <- ${JSON.stringify(resultKey)}
+      .resultText <- paste(capture.output(print(result)), collapse="\\n")
+    }
+  }
+  paste0("__RESULT__", .resultText, "__CONSOLE__", .consoleText, "__SAVED__", .savedName, "__RKEY__", .resultKey)
 }
-.nlstat_out <- tryCatch(.nlstat_run(), error=function(e) paste0("__ERR__", conditionMessage(e)))
-.nlstat_out
+.vibestats_out <- tryCatch(.vibestats_run(), error=function(e) paste0("__ERR__", conditionMessage(e)))
+.vibestats_out
 `;
   const installed = new Set();
   for (let attempt=0; attempt<3; attempt++) {
@@ -316,21 +375,48 @@ async function executeR(code) {
       }
       throw new Error('R execution error: ' + msg);
     }
-    // split result/console
-    let resultText = '', consoleText = '';
-    const ri = out.indexOf('__RESULT__'), ci = out.indexOf('__CONSOLE__');
-    if (ri>=0 && ci>=0) { resultText = out.slice(ri+10, ci); consoleText = out.slice(ci+11); }
-    // plot
+    let resultText = '', consoleText = '', savedDataset = '', resultKeyOut = '';
+    const ri = out.indexOf('__RESULT__'), ci = out.indexOf('__CONSOLE__'), si = out.indexOf('__SAVED__'), ki = out.indexOf('__RKEY__');
+    if (ri>=0 && ci>=0 && si>=0 && ki>=0) {
+      resultText = out.slice(ri+10, ci);
+      consoleText = out.slice(ci+11, si);
+      savedDataset = out.slice(si+9, ki);
+      resultKeyOut = out.slice(ki+8);
+    }
     let plot = null;
-    try { const buf = await webR.FS.readFile('/tmp/__nlstat_plot.png');
+    try { const buf = await webR.FS.readFile('/tmp/__vibestats_plot.png');
       if (buf && buf.length>100) { let bin=''; for(let i=0;i<buf.length;i++) bin+=String.fromCharCode(buf[i]);
-        plot='data:image/png;base64,'+btoa(bin); await webR.FS.unlink('/tmp/__nlstat_plot.png').catch(()=>{}); } } catch(e){}
+        plot='data:image/png;base64,'+btoa(bin); await webR.FS.unlink('/tmp/__vibestats_plot.png').catch(()=>{}); } } catch(e){}
     await getSchema();
     const after = Object.keys(window._dsCache||{});
     const newOnes = after.filter(n=>!before.has(n));
-    return { resultText, consoleText, plot, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
+    return { resultText, consoleText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
   }
   throw new Error('R execution error: still failing after package install');
+}
+
+async function saveStoredResultAsDataset(resultKey, requestedName) {
+  const safe = (requestedName || '').trim().replace(/\W+/g, '_').replace(/^_+|_+$/g, '');
+  if (!safe) throw new Error('Dataset name is empty.');
+  const nm = /^\d/.test(safe) ? 'd_' + safe : safe;
+  const code = `local({
+    .env <- .nlstat_env
+    key <- ${JSON.stringify(resultKey)}; nm <- ${JSON.stringify(nm)}
+    if (!exists(key, envir=.env, inherits=FALSE)) stop("Saved result is no longer available.")
+    x <- get(key, envir=.env)
+    df <- NULL
+    if (is.data.frame(x)) df <- x
+    else if (is.matrix(x) || is.table(x)) df <- as.data.frame(x)
+    else if (is.atomic(x)) df <- data.frame(value=as.vector(x), check.names=FALSE)
+    else df <- as.data.frame(capture.output(print(x)), stringsAsFactors=FALSE)
+    base <- nm; i <- 1L
+    while (exists(nm, envir=.env, inherits=FALSE)) { i <- i + 1L; nm <- paste0(base, i) }
+    assign(nm, df, envir=.env)
+    nm
+  })`;
+  const finalName = await webR.evalRString(code);
+  await getSchema();
+  return finalName;
 }
 
 // ===== Multi-format data import =====
@@ -493,7 +579,7 @@ function useSplitter() {
 }
 
 // Accumulating stream pane (result or log). Auto-scrolls to bottom.
-function StreamPane({ entries, kind, onInterpret }) {
+function StreamPane({ entries, kind, onInterpret, onSaveResult }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [entries.length]);
   if (!entries.length) return h('div', { className:'stream', ref },
@@ -503,11 +589,11 @@ function StreamPane({ entries, kind, onInterpret }) {
       h('div', { className:'ehead' }, en.head),
       en.plot && h('img', { src:en.plot }),
       en.text && h('span', null, en.text),
-      kind==='result' && onInterpret && !en.error && (en.text||en.plot) &&
-        h('div', { style:{marginTop:'5px'} },
-          en.interp ? h('div',{className:'interp'}, en.interp)
-            : h('button', { className:'nl-go', style:{padding:'3px 10px',fontSize:'11px'},
-                onClick:()=>onInterpret(en.id) }, en.interpreting ? 'Interpreting…' : 'Interpret')))));
+      kind==='result' && !en.error && (en.text||en.plot) &&
+        h('div', { className:'entry-actions' },
+          onInterpret && (en.interp ? h('div',{className:'interp'}, en.interp)
+            : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? '해석 중…' : 'Interpret')),
+          onSaveResult && en.resultKey && h('button', { className:'nl-go', onClick:()=>onSaveResult(en.id) }, 'Save')))));
 }
 
 function App() {
@@ -525,7 +611,9 @@ function App() {
   const [ctx, setCtx] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedDatasets, setSelectedDatasets] = useState([]);
   const [selectionBox, setSelectionBox] = useState(null);
+  const [progress, setProgress] = useState(null);
   const [openMenu, setOpenMenu] = useState(null);
   const promptRef = useRef();
   const fileRef = useRef();
@@ -540,6 +628,35 @@ function App() {
   function pushResult(en) { setResultEntries(es => [...es, { id:++entryCounter, ...en }]); }
   function pushLog(en) { setLogEntries(es => [...es, { id:++entryCounter, ...en }]); }
 
+  function showProgress(text, pct=12, note='대용량 데이터나 패키지 설치 상황에 따라 시간이 달라질 수 있습니다.') {
+    setProgress({ text, pct, note, started:Date.now() });
+  }
+  function hideProgress() { setProgress(null); }
+
+  async function saveTextFile(defaultName, mime, content) {
+    if (window.showSaveFilePicker) {
+      const handle = await window.showSaveFilePicker({ suggestedName: defaultName, types:[{ description: defaultName, accept:{ [mime]: ['.' + defaultName.split('.').pop()] } }] });
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      return true;
+    }
+    const blob = new Blob([content], {type:mime});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=defaultName; a.click(); URL.revokeObjectURL(a.href);
+    return false;
+  }
+  async function saveBlobFile(defaultName, mime, blob) {
+    if (window.showSaveFilePicker) {
+      const handle = await window.showSaveFilePicker({ suggestedName: defaultName, types:[{ description: defaultName, accept:{ [mime]: ['.' + defaultName.split('.').pop()] } }] });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return true;
+    }
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=defaultName; a.click(); URL.revokeObjectURL(a.href);
+    return false;
+  }
+
   // ---- file load (multi-format) ----
   async function onFile(e) {
     const f = e.target.files[0]; if (!f) return; e.target.value='';
@@ -547,39 +664,64 @@ function App() {
     let base = f.name.replace(/\.[^.]+$/,'').replace(/\W+/g,'_') || 'data';
     if (/^\d/.test(base)) base = 'd_'+base;
     let nm = base, i=1; while ((window._dsCache||{})[nm]) { i++; nm = base+i; }
-    setBusy(true);
+    setBusy(true); showProgress(`Importing dataset '${nm}'…`, 18, '파일 크기와 형식에 따라 걸리는 시간이 달라집니다.');
     try {
-      await loadDataFile(nm, f); await refreshSchema();
+      await loadDataFile(nm, f); showProgress(`Refreshing dataset list…`, 82);
+      await refreshSchema();
       const sc = window._dsCache[nm];
       pushLog({ head:`[${now()}] load '${nm}'`, text:`Loaded ${sc.shape[0]} rows × ${sc.shape[1]} cols\nColumns: ${sc.columns.join(', ')}` });
     } catch(err){ pushLog({ head:`[${now()}] load failed`, error:true, text: err.message||String(err) }); }
-    setBusy(false);
+    hideProgress(); setBusy(false);
   }
 
   // ---- prompt → code ----
   async function onInterpretPrompt() {
     const text = promptRef.current.value.trim(); if (!text) return;
-    setBusy(true); setParseErr('');
+    setBusy(true); setParseErr(''); showProgress('Generating R code…', 35, '데이터 값은 보내지 않고 데이터셋/컬럼 구조만 사용합니다.');
     try { const a = await parseNL(text); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||''); }
     catch(e){ setParseErr(e.message||String(e)); }
-    setBusy(false);
+    hideProgress(); setBusy(false);
   }
 
-  // ---- run code (optionally create block) ----
-  async function runCodeCore(code, summary, index) {
-    const res = await executeR(code).catch(e => ({ error: e.message||String(e) }));
-    return res;
+  async function runCodeCore(code) {
+    return await executeR(code).catch(e => ({ error: e.message||String(e) }));
   }
 
-  // Run only (no block) — show in result/log
+  async function runCodeWithRepair(initialCode, summary) {
+    let currentCode = initialCode, currentSummary = summary, currentFormula = formula;
+    let res = null;
+    for (let attempt=1; attempt<=5; attempt++) {
+      showProgress(attempt===1 ? 'Running R code…' : `Repairing and retrying R code (${attempt}/5)…`, Math.min(88, 15 + attempt*14), '오류가 있으면 최대 5회까지 자동으로 코드를 수정해 다시 실행합니다.');
+      res = await runCodeCore(currentCode);
+      if (!res.error) return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:attempt>1 };
+      const msg = buildErrorLog(res.error);
+      setParseErr(`오류가 발생했습니다. 자동 수정 시도 ${attempt}/5\n${msg}`);
+      pushLog({ head:`[${now()}] auto-repair ${attempt}/5`, error:true, text:msg });
+      if (attempt===5) break;
+      try {
+        const fixed = await repairRCode(currentCode, currentSummary, res.error, attempt+1);
+        currentCode = fixed.code; currentSummary = fixed.summary || currentSummary; currentFormula = fixed.formula || currentFormula;
+        setCodeText(currentCode); setRestate(currentSummary); setFormula(currentFormula);
+        pushLog({ head:`[${now()}] code repaired ${attempt}/5`, text: fixed.reason || 'Code was revised automatically.' });
+      } catch(repairErr) {
+        res = { error: 'Auto-repair failed: ' + (repairErr.message || repairErr) };
+        setParseErr(`오류가 발생했고 자동 수정에도 실패했습니다.\n${buildErrorLog(res.error)}`);
+        break;
+      }
+    }
+    return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:true };
+  }
+
+  // Run only (no block)
   async function onRunOnly() {
     const code = codeText.trim();
     if (!code) { setParseErr('No code to run.'); return; }
-    setBusy(true);
-    const res = await runCodeCore(code, restate);
+    setBusy(true); setParseErr('');
+    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40));
     await refreshSchema();
-    dispatchOutput(res, restate || code.split('\n')[0].slice(0,40), code);
-    setBusy(false);
+    dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code);
+    if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
+    hideProgress(); setBusy(false);
   }
 
   // Run + create block
@@ -588,17 +730,19 @@ function App() {
     if (!code) { setParseErr('No code to run.'); return; }
     const index = blocks.length + 1;
     const id = 'b' + (++idCounter.current);
-    setBusy(true);
-    const res = await runCodeCore(code, restate);
+    setBusy(true); setParseErr('');
+    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40));
     await refreshSchema();
-    const status = res.error ? 'err' : 'ok';
-    const block = { id, index, summary:restate||code.split('\n')[0].slice(0,40), code, formula,
-                    status, label:'', newline:false };
+    const status = rr.res.error ? 'err' : 'ok';
+    const block = { id, index, summary:rr.summary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||'', status, label:'', newline:false };
     setBlocks(bs => [...bs, block]);
     setActiveId(id);
-    dispatchOutput(res, `#${index} ${restate||''}`.trim(), code);
-    if (!res.error && res.newDataset) setNewNames(p=>p.includes(res.newDataset)?p:[...p,res.newDataset]);
-    promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); setBusy(false);
+    dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code);
+    if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
+    if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
+    if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
+    if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
+    hideProgress(); setBusy(false);
   }
 
   // Route output: result text → result pane; console/errors → log pane
@@ -608,20 +752,24 @@ function App() {
       pushLog({ head: ts + ' — FAILED', error:true, text: buildErrorLog(res.error) });
       return;
     }
-    // result pane: analysis result and/or plot
+    if (res.savedDataset) {
+      pushLog({ head: ts + ' — dataset saved', text:`Raw data result was saved as dataset '${res.savedDataset}' and was not printed in Results.` });
+    }
+    if (res.newDataset && res.newDataset !== res.savedDataset) {
+      pushLog({ head: ts + ' — dataset created', text:`New dataset created: '${res.newDataset}'.` });
+    }
     if ((res.resultText && res.resultText.trim()) || res.plot) {
       pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', plot: res.plot || null,
-                   _code: code, _summary: head });
+                   _code: code, _summary: head, resultKey: res.resultKey || null });
     }
-    // log pane: console (non-result) output
     if (res.consoleText && res.consoleText.trim()) {
       pushLog({ head: ts, text: res.consoleText.trim() });
-    } else if (!((res.resultText&&res.resultText.trim())||res.plot)) {
+    } else if (!((res.resultText&&res.resultText.trim())||res.plot) && !res.savedDataset) {
       pushLog({ head: ts, text: '(no output)' });
     }
   }
 
-  // interpret a result entry
+  // interpret/save a result entry
   async function onInterpretResult(entryId) {
     setResultEntries(es => es.map(e => e.id===entryId ? {...e, interpreting:true} : e));
     const en = resultEntries.find(e=>e.id===entryId);
@@ -633,17 +781,31 @@ function App() {
       setResultEntries(es => es.map(x => x.id===entryId ? {...x, interp:'Interpretation failed: '+(e.message||e), interpreting:false} : x));
     }
   }
+  async function onSaveResult(entryId) {
+    const en = resultEntries.find(e=>e.id===entryId);
+    if (!en || !en.resultKey) return;
+    const name = prompt('저장할 데이터셋 이름을 입력하세요:', 'saved_result');
+    if (name===null) return;
+    try {
+      const finalName = await saveStoredResultAsDataset(en.resultKey, name);
+      await refreshSchema();
+      setNewNames(p=>p.includes(finalName)?p:[...p,finalName]);
+      pushLog({ head:`[${now()}] result saved`, text:`Result saved as dataset '${finalName}'.` });
+    } catch(err) { pushLog({ head:`[${now()}] result save failed`, error:true, text:err.message||String(err) }); }
+  }
 
   async function rerun(id) {
     const b = blocksRef.current.find(x=>x.id===id); if (!b) return;
     setBlocks(bs=>bs.map(x=>x.id===id?{...x,status:'run'}:x));
-    const res = await runCodeCore(b.code, b.summary);
+    const rr = await runCodeWithRepair(b.code, b.summary);
     await refreshSchema();
-    const status = res.error ? 'err' : 'ok';
-    setBlocks(bs=>bs.map(x=>x.id===id?{...x,status}:x));
+    const status = rr.res.error ? 'err' : 'ok';
+    setBlocks(bs=>bs.map(x=>x.id===id?{...x,status,code:rr.code,summary:rr.summary||x.summary,formula:rr.formula||x.formula}:x));
     setActiveId(id);
-    dispatchOutput(res, `#${b.index} ${b.summary||''} (rerun)`.trim(), b.code);
-    if (!res.error && res.newDataset) setNewNames(p=>p.includes(res.newDataset)?p:[...p,res.newDataset]);
+    dispatchOutput(rr.res, `#${b.index} ${rr.summary||b.summary||''} (rerun)`.trim(), rr.code);
+    if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
+    if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
+    hideProgress();
   }
   function showBlockInfo(id){ const b=blocksRef.current.find(x=>x.id===id); if(b) setModal({ title:`#${b.index} block`, body:`${b.label?'Label: '+b.label+'\n\n':''}Prompt:\n${b.summary || '(none)'}\n\nFormula:\n${b.formula || '(none)'}\n\nCode:\n${b.code}` }); }
   function deleteBlock(id){ setBlocks(bs=>bs.filter(x=>x.id!==id).map((b,i)=>({...b,index:i+1}))); setSelectedIds(ids=>ids.filter(x=>x!==id)); }
@@ -668,28 +830,62 @@ function App() {
   async function onDeleteDataset(name) {
     await deleteDataset(name); await refreshSchema();
     setNewNames(p=>p.filter(n=>n!==name));
+    setSelectedDatasets(ds=>ds.filter(x=>x!==name));
+  }
+  async function onDeleteSelectedDatasets() {
+    if (!selectedDatasets.length) return;
+    if (!confirm(`Delete ${selectedDatasets.length} selected datasets?`)) return;
+    for (const n of selectedDatasets) await deleteDataset(n);
+    await refreshSchema();
+    setNewNames(p=>p.filter(n=>!selectedDatasets.includes(n)));
+    pushLog({ head:`[${now()}] datasets deleted`, text:`Deleted: ${selectedDatasets.join(', ')}` });
+    setSelectedDatasets([]);
+  }
+  async function onRenameDataset(oldName) {
+    const proposed = prompt(`Rename dataset '${oldName}' to:`, oldName);
+    if (proposed===null) return;
+    let nm = proposed.trim().replace(/\W+/g,'_').replace(/^_+|_+$/g,'');
+    if (!nm) { alert('Dataset name cannot be empty.'); return; }
+    if (/^\d/.test(nm)) nm = 'd_' + nm;
+    try {
+      await webR.evalRVoid(`local({ .env <- .nlstat_env; old <- ${JSON.stringify(oldName)}; new <- ${JSON.stringify(nm)}; if (!exists(old, envir=.env, inherits=FALSE)) stop("dataset not found"); if (exists(new, envir=.env, inherits=FALSE)) stop("target name already exists"); assign(new, get(old, envir=.env), envir=.env); rm(list=old, envir=.env) })`);
+      await refreshSchema();
+      setNewNames(p=>p.map(x=>x===oldName?nm:x));
+      setSelectedDatasets(p=>p.map(x=>x===oldName?nm:x));
+      pushLog({ head:`[${now()}] dataset renamed`, text:`${oldName} → ${nm}` });
+    } catch(err) { alert('Rename failed: '+(err.message||err)); }
   }
   async function onSaveDataset(name) {
     const csv = await exportCSV(name);
     const blob = new Blob([csv], {type:'text/csv'});
-    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name+'.csv'; a.click();
-    URL.revokeObjectURL(a.href);
+    await saveBlobFile(name+'.csv', 'text/csv', blob);
   }
 
   // ---- File menu ----
   async function saveAllDatasets() {
     const names = await allDatasetNames();
     if (!names.length) { alert('No datasets to save.'); return; }
-    for (const n of names) { await onSaveDataset(n); await new Promise(r=>setTimeout(r,150)); }
+    if (window.showDirectoryPicker) {
+      const dir = await window.showDirectoryPicker();
+      for (const n of names) {
+        const handle = await dir.getFileHandle(n+'.csv', {create:true});
+        const writable = await handle.createWritable();
+        await writable.write(await exportCSV(n));
+        await writable.close();
+      }
+      pushLog({ head:`[${now()}] save all datasets`, text:`Saved ${names.length} CSV files to the selected folder.` });
+    } else {
+      for (const n of names) { await onSaveDataset(n); await new Promise(r=>setTimeout(r,150)); }
+      alert('Your browser does not support folder selection here, so each CSV was downloaded separately. Chrome/Edge support selecting a folder.');
+    }
   }
   async function saveProject() {
     const names = await allDatasetNames(); const datasets={};
     for (const n of names) datasets[n] = await exportCSV(n);
-    const proj = { version:2, savedAt:new Date().toISOString(),
+    const proj = { version:3, app:'Vibestats', savedAt:new Date().toISOString(),
       blocks: blocks.map(b=>({index:b.index,summary:b.summary,code:b.code,label:b.label,status:b.status,formula:b.formula,newline:b.newline})),
       datasets };
-    const blob = new Blob([JSON.stringify(proj,null,2)], {type:'application/json'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='nlstat_project.json'; a.click(); URL.revokeObjectURL(a.href);
+    await saveTextFile('vibestats_project.json', 'application/json', JSON.stringify(proj,null,2));
   }
   async function newProject() {
     if (!confirm('Clear everything and start a new project?')) return;
@@ -718,7 +914,31 @@ function App() {
     } catch(err){ alert('Import failed: '+(err.message||err)); }
     setBusy(false);
   }
-  function onApiKey(){ const k=prompt('OpenAI API key (stored in browser localStorage only):', getKey()); if(k!==null) localStorage.setItem('openai_key', k.trim()); }
+  async function exportRCode() {
+    if (!blocks.length) { alert('No blocks to export.'); return; }
+    const lines = [];
+    lines.push('# Vibestats exported R code');
+    lines.push('# Exported: ' + new Date().toISOString());
+    lines.push('# Non-code information is written as comments.');
+    lines.push('');
+    let currentLabel = '';
+    blocks.forEach((b, i) => {
+      if ((i===0 || b.newline) && b.label) currentLabel = b.label;
+      if (i===0 || b.newline) {
+        lines.push('');
+        lines.push('# ============================================================');
+        lines.push('# Label: ' + (currentLabel || '(no label)'));
+        lines.push('# ============================================================');
+      }
+      lines.push('');
+      lines.push(`# Block #${b.index}`);
+      lines.push('# Prompt: ' + (b.summary || '(none)').replace(/\n/g, '\n#         '));
+      lines.push('# Formula: ' + (b.formula || '(none)').replace(/\n/g, '\n#          '));
+      lines.push('# Status: ' + (b.status || '(unknown)'));
+      lines.push(b.code || '# (no code)');
+    });
+    await saveTextFile('vibestats_blocks.R', 'text/x-r-source', lines.join('\n') + '\n');
+  }
 
   function fullscreen(title, kind) {
     if (kind==='result') setModal({ title, full:true, streamKind:'result', entries:resultEntries });
@@ -751,6 +971,31 @@ function App() {
     document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
   }
 
+  function beginDatasetAreaSelect(e) {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
+    if (!e.target.classList.contains('ds-list')) return;
+    e.preventDefault();
+    const sx=e.clientX, sy=e.clientY;
+    setSelectedDatasets([]);
+    const move = (ev) => {
+      const x=Math.min(sx, ev.clientX), y=Math.min(sy, ev.clientY);
+      const w=Math.abs(ev.clientX-sx), ht=Math.abs(ev.clientY-sy);
+      setSelectionBox({x,y,w,h:ht});
+    };
+    const up = (ev) => {
+      document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+      const x=Math.min(sx, ev.clientX), y=Math.min(sy, ev.clientY), r=x+Math.abs(ev.clientX-sx), b=y+Math.abs(ev.clientY-sy);
+      const names=[];
+      document.querySelectorAll('.ds-item').forEach(el => {
+        const br=el.getBoundingClientRect();
+        if (br.left < r && br.right > x && br.top < b && br.bottom > y) names.push(el.getAttribute('data-name'));
+      });
+      setSelectedDatasets(names.filter(Boolean));
+      setSelectionBox(null);
+    };
+    document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+  }
+
   const dsNames = Object.keys(schema);
 
   return h('div', { style:{height:'100%'} },
@@ -760,13 +1005,12 @@ function App() {
         { label:'New Project', onClick:newProject },
         { label:'Import Project…', onClick:importProjectClick },
         { sep:true },
-        { label:'Save Project (.json)', onClick:saveProject },
-        { label:'Save All Datasets (.csv)', onClick:saveAllDatasets },
+        { label:'Save Project As… (.json)', onClick:saveProject },
+        { label:'Save All Datasets To Folder… (.csv)', onClick:saveAllDatasets },
       ]}),
       h('div', { className:'spacer' }),
       h('div', { className:'right' },
-        h('span', { className:'logo' }, 'nl', h('b',null,'stat'), ' · ', h('span',{className:'r'},'WebR')),
-        h('button', { onClick:onApiKey }, 'API Key'))),
+        h('span', { className:'logo' }, 'Vibe', h('b',null,'stats'), ' · ', h('span',{className:'r'},'WebR')))),
 
     h('input', { ref:fileRef, type:'file', accept:'.csv,.tsv,.dta,.sav,.por,.sas7bdat,.xpt,.xls,.xlsx,.rds,.rdata,.rda', style:{display:'none'}, onChange:onFile }),
     h('input', { ref:projRef, type:'file', accept:'.json', style:{display:'none'}, onChange:onImportProject }),
@@ -779,8 +1023,8 @@ function App() {
           h('div', { className:'content' },
             h('button', { className:'load-btn', onClick:()=>fileRef.current.click() }, '＋ Import Data'),
             h('div', { style:{fontSize:'9px',color:'var(--ink-faint)',fontFamily:'var(--mono)',padding:'0 11px 4px',marginTop:'-4px'} }, 'CSV · Stata · SAS · SPSS · Excel · R'),
-            h('div', { className:'ds-list' },
-              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],newNames.includes(n),showPreview,setCtx))
+            h('div', { className:'ds-list', onMouseDown:beginDatasetAreaSelect, onContextMenu:e=>{ if(selectedDatasets.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'datasets-selected'}); } } },
+              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],newNames.includes(n),selectedDatasets.includes(n),showPreview,setCtx,setSelectedDatasets))
                 : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete')))))),
 
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h') }),
@@ -793,7 +1037,7 @@ function App() {
             h('button',{className:'tbtn', title:'Clear', onClick:()=>setResultEntries([])},'clear'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Results','result')},'⛶')),
           h('div', { className:'content' },
-            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult }))),
+            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSaveResult:onSaveResult }))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window', style:{flex:'0 0 270px'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt → R Code', h('span',{className:'grow'})),
@@ -821,6 +1065,7 @@ function App() {
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
             h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — fixed order · drag down for new row'),
             h('span',{className:'grow'}),
+            h('button',{className:'tbtn', title:'Export R code', onClick:exportRCode},'rcode'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Blocks','blocks')},'⛶')),
           h('div', { className:'content' },
             h('div', { className:'blocks-scroll', onMouseDown:beginBlockAreaSelect, onContextMenu:e=>{ if(selectedIds.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'blocks-selected'}); } } },
@@ -839,7 +1084,7 @@ function App() {
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'') },
         h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
-        modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null}))
+        modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null}))
           : modal.blocksView ? h('div',{className:'mbody',style:{padding:'14px'}}, h('div',{className:'blocks-flow'}, renderBlocksFlow(blocksRef.current, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds})))
           : modal.html ? h('div',{className:'mbody', dangerouslySetInnerHTML:{__html:modal.html}})
           : h('div',{className:'mbody'}, modal.body),
@@ -847,12 +1092,24 @@ function App() {
 
     selectionBox && h('div', { className:'select-box', style:{left:selectionBox.x, top:selectionBox.y, width:selectionBox.w, height:selectionBox.h} }),
 
+    progress && h('div', { className:'progress-bg' },
+      h('div', { className:'progress-card' },
+        h('div', { className:'ptitle' }, 'Processing…'),
+        h('div', { className:'pmsg' }, progress.text),
+        h('div', { className:'pbar' }, h('i', { style:{width:Math.max(8, Math.min(100, progress.pct || 25)) + '%'} })),
+        h('div', { className:'pnote' }, progress.note || '작업을 처리하는 중입니다.'))),
+
     // Context menu
     ctx && h('div', { className:'ctx', style:{left:ctx.x, top:ctx.y}, onClick:e=>e.stopPropagation() },
       ctx.kind==='dataset'
         ? [ h('div',{key:1,className:'item', onClick:()=>{ showPreview(ctx.name); setCtx(null); }},'Preview'),
             h('div',{key:2,className:'item', onClick:()=>{ onSaveDataset(ctx.name); setCtx(null); }},'Save'),
-            h('div',{key:3,className:'item danger', onClick:()=>{ if(confirm(`Delete '${ctx.name}'?`)) onDeleteDataset(ctx.name); setCtx(null); }},'Delete') ]
+            h('div',{key:3,className:'item', onClick:()=>{ onRenameDataset(ctx.name); setCtx(null); }},'Rename'),
+            selectedDatasets.length > 1 && selectedDatasets.includes(ctx.name)
+              ? h('div',{key:4,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`)
+              : h('div',{key:5,className:'item danger', onClick:()=>{ if(confirm(`Delete '${ctx.name}'?`)) onDeleteDataset(ctx.name); setCtx(null); }},'Delete') ]
+        : ctx.kind==='datasets-selected'
+          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`) ]
         : ctx.kind==='blocks-selected'
           ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }},`Delete ${selectedIds.length} blocks`) ]
           : [ h('div',{key:1,className:'item danger', onClick:()=>{ if (selectedIds.length > 1 && selectedIds.includes(ctx.id)) deleteSelectedBlocks(); else deleteBlock(ctx.id); setCtx(null); }}, selectedIds.length > 1 && selectedIds.includes(ctx.id) ? `Delete ${selectedIds.length} blocks` : 'Delete block') ])
@@ -916,10 +1173,13 @@ function blockSquare(b, activeId, selectedIds, fns) {
       h('div',{className:'bbtn',title:'rerun',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.rerun(b.id)},'↻'),
       h('div',{className:'bbtn',title:'info',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.showBlockInfo(b.id)},'ⓘ')));
 }
-function dsItem(n, info, isNew, showPreview, setCtx) {
-  return h('div', { key:n, className:'ds-item'+(isNew?' new':''),
-    onClick:()=>showPreview(n),
-    onContextMenu:e=>{ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } },
+function dsItem(n, info, isNew, selected, showPreview, setCtx, setSelectedDatasets) {
+  return h('div', { key:n, 'data-name':n, className:'ds-item'+(isNew?' new':'')+(selected?' selected':''),
+    onClick:e=>{
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); setSelectedDatasets(ds=>ds.includes(n)?ds.filter(x=>x!==n):[...ds,n]); return; }
+      setSelectedDatasets([]); showPreview(n);
+    },
+    onContextMenu:e=>{ e.preventDefault(); if (selected) setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { setSelectedDatasets([]); setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm'}, n), h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}${isNew?' · new':''}`));
 }
 
