@@ -84,6 +84,9 @@
   .ds-item { font-family: var(--mono); font-size: 11px; padding: 6px 7px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 4px; cursor: pointer; }
   .ds-item:hover { border-color: var(--line-bright); background: var(--soft-hover); }
   .ds-item.new { border-left-color: var(--accent); }
+  .ds-item.kind-uploaded { border-left-color: var(--blue); }
+  .ds-item.kind-created { border-left-color: var(--amber); }
+  .ds-item.kind-result { border-left-color: var(--green); }
   .ds-item .nm { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ds-item .dim { color: var(--ink-faint); font-size: 10px; margin-top: 2px; }
   .ds-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 11px; padding: 8px; grid-column: 1 / -1; }
@@ -836,8 +839,25 @@ function analyzeError(msg) {
            fix:'• Open the block ⓘ to inspect the executed R code.\n• Verify dataset/column names and types (str).\n• Try rephrasing the prompt more specifically.' };
 }
 function buildErrorLog(msg) {
-  const a = analyzeError(msg);
-  return `■ Original: ${msg.replace(/^R execution error:\s*/,'')}\n\n■ Cause:\n${a.cause}\n\n■ Suggested fix:\n${a.fix}`;
+  return cleanErrorMessage(msg);
+}
+
+function cleanErrorMessage(msg) {
+  return String(msg || '').replace(/^R execution error:\s*/, '').trim();
+}
+function isDataReferenceError(msg) {
+  const m = cleanErrorMessage(msg);
+  return /object ['"“”‘’]?[\w.]+['"“”‘’]? not found/i.test(m)
+    || /undefined columns selected/i.test(m)
+    || /subscript out of bounds/i.test(m)
+    || /object of type ['"]closure['"] is not subsettable/i.test(m)
+    || /variable lengths differ/i.test(m)
+    || /dataset .* not found/i.test(m)
+    || /data set .* not found/i.test(m)
+    || /unknown column|can't subset columns|select.*column/i.test(m);
+}
+function dataReferenceMessage(msg) {
+  return '데이터셋을 지정하거나 변수명을 올바르게 지정해 주세요.\n\n' + cleanErrorMessage(msg);
 }
 
 function now() { return new Date().toLocaleTimeString('en-US', {hour12:false}); }
@@ -907,6 +927,7 @@ function StreamPane({ entries, kind, onInterpret, onSaveResult }) {
 function App() {
   const [schema, setSchema] = useState({});
   const [newNames, setNewNames] = useState([]);
+  const [datasetKinds, setDatasetKinds] = useState({});
   const [blocks, setBlocks] = useState([]);
   const [codeText, setCodeText] = useState('');
   const [restate, setRestate] = useState('');
@@ -952,6 +973,15 @@ function App() {
 
   function pushResult(en) { setResultEntries(es => [...es, { id:++entryCounter, ...en }]); }
   function pushLog(en) { setResultEntries(es => [...es, { id:++entryCounter, system:true, ...en }]); }
+  function markDatasetKind(names, kind) {
+    const arr = String(names || '').split(',').map(x => x.trim()).filter(Boolean);
+    if (!arr.length) return;
+    setDatasetKinds(prev => {
+      const next = {...prev};
+      for (const n of arr) next[n] = kind;
+      return next;
+    });
+  }
 
   function showProgress(text, pct=12, note='대용량 데이터나 패키지 설치 상황에 따라 시간이 달라질 수 있습니다.') {
     setProgress({ text, pct, note, started:Date.now() });
@@ -993,6 +1023,7 @@ function App() {
       await loadDataFile(nm, f); showProgress(`Refreshing dataset list…`, 82);
       await refreshSchema();
       const sc = window._dsCache[nm];
+      markDatasetKind(nm, 'uploaded');
       pushLog({ head:`[${now()}] load '${nm}'`, text:`Loaded ${sc.shape[0]} rows × ${sc.shape[1]} cols\nColumns: ${sc.columns.join(', ')}` });
     } catch(err){ pushLog({ head:`[${now()}] load failed`, error:true, text: err.message||String(err) }); }
     hideProgress(); setBusy(false);
@@ -1017,7 +1048,12 @@ function App() {
       showProgress(attempt===1 ? 'Running R code…' : `Repairing and retrying R code (${attempt}/5)…`, Math.min(88, 15 + attempt*14), '오류가 있으면 최대 5회까지 자동으로 코드를 수정해 다시 실행합니다.');
       res = await runCodeCore(currentCode);
       if (!res.error) return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:attempt>1 };
-      const msg = buildErrorLog(res.error);
+      if (isDataReferenceError(res.error)) {
+        const msg = dataReferenceMessage(res.error);
+        setParseErr(msg);
+        return { res:{ error: msg }, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:false, noRepair:true };
+      }
+      const msg = cleanErrorMessage(res.error);
       setParseErr(`오류가 발생했습니다. 자동 수정 시도 ${attempt}/5\n${msg}`);
       pushLog({ head:`[${now()}] auto-repair ${attempt}/5`, error:true, text:msg });
       if (attempt===5) break;
@@ -1028,7 +1064,7 @@ function App() {
         pushLog({ head:`[${now()}] code repaired ${attempt}/5`, text: fixed.reason || 'Code was revised automatically.' });
       } catch(repairErr) {
         res = { error: 'Auto-repair failed: ' + (repairErr.message || repairErr) };
-        setParseErr(`오류가 발생했고 자동 수정에도 실패했습니다.\n${buildErrorLog(res.error)}`);
+        setParseErr(`오류가 발생했고 자동 수정에도 실패했습니다.\n${cleanErrorMessage(res.error)}`);
         break;
       }
     }
@@ -1069,13 +1105,15 @@ function App() {
   function dispatchOutput(res, head, code) {
     const ts = `[${now()}] ${head}`;
     if (res.error) {
-      pushLog({ head: ts + ' — FAILED', error:true, text: buildErrorLog(res.error) });
+      pushLog({ head: ts + ' — FAILED', error:true, text: cleanErrorMessage(res.error) });
       return;
     }
     if (res.savedDataset) {
+      markDatasetKind(res.savedDataset, 'result');
       pushLog({ head: ts + ' — dataset saved', text:`Large/raw result with more than 100 rows was saved as dataset '${res.savedDataset}' and was not printed in Results.` });
     }
-    if (res.newDataset && res.newDataset !== res.savedDataset) {
+    if (res.newDataset && res.newDataset !== res.savedDataset && !String(res.savedDataset || '').split(',').includes(res.newDataset)) {
+      markDatasetKind(res.newDataset, 'created');
       pushLog({ head: ts + ' — dataset created', text:`New dataset created: '${res.newDataset}'.` });
     }
     const resultLineCount = res.resultText ? res.resultText.split(/\r?\n/).length : 0;
@@ -1135,6 +1173,7 @@ function App() {
       const finalName = await saveStoredResultAsDataset(en.resultKey, name);
       await refreshSchema();
       setNewNames(p=>p.includes(finalName)?p:[...p,finalName]);
+      markDatasetKind(finalName, 'result');
       pushLog({ head:`[${now()}] result saved`, text:`Result saved as dataset '${finalName}'.` });
     } catch(err) { pushLog({ head:`[${now()}] result save failed`, error:true, text:err.message||String(err) }); }
   }
@@ -1175,6 +1214,7 @@ function App() {
   async function onDeleteDataset(name) {
     await deleteDataset(name); await refreshSchema();
     setNewNames(p=>p.filter(n=>n!==name));
+    setDatasetKinds(k=>{ const next={...k}; delete next[name]; return next; });
     setSelectedDatasets(ds=>ds.filter(x=>x!==name));
   }
   async function onDeleteSelectedDatasets() {
@@ -1183,6 +1223,7 @@ function App() {
     for (const n of selectedDatasets) await deleteDataset(n);
     await refreshSchema();
     setNewNames(p=>p.filter(n=>!selectedDatasets.includes(n)));
+    setDatasetKinds(k=>{ const next={...k}; for (const n of selectedDatasets) delete next[n]; return next; });
     pushLog({ head:`[${now()}] datasets deleted`, text:`Deleted: ${selectedDatasets.join(', ')}` });
     setSelectedDatasets([]);
   }
@@ -1196,6 +1237,7 @@ function App() {
       await webR.evalRVoid(`local({ .env <- .nlstat_env; old <- ${JSON.stringify(oldName)}; new <- ${JSON.stringify(nm)}; if (!exists(old, envir=.env, inherits=FALSE)) stop("dataset not found"); if (exists(new, envir=.env, inherits=FALSE)) stop("target name already exists"); assign(new, get(old, envir=.env), envir=.env); rm(list=old, envir=.env) })`);
       await refreshSchema();
       setNewNames(p=>p.map(x=>x===oldName?nm:x));
+      setDatasetKinds(k=>{ const next={...k}; if (next[oldName]) { next[nm]=next[oldName]; delete next[oldName]; } return next; });
       setSelectedDatasets(p=>p.map(x=>x===oldName?nm:x));
       pushLog({ head:`[${now()}] dataset renamed`, text:`${oldName} → ${nm}` });
     } catch(err) { alert('Rename failed: '+(err.message||err)); }
@@ -1236,7 +1278,7 @@ function App() {
     const names = await allDatasetNames();
     for (const n of names) await deleteDataset(n);
     await refreshSchema();
-    setBlocks([]); setNewNames([]); setCodeText(''); setRestate(''); setFormula('');
+    setBlocks([]); setNewNames([]); setDatasetKinds({}); setCodeText(''); setRestate(''); setFormula('');
     
     // === INITIALIZE WITH WELCOME MESSAGE ===
     setResultEntries([initialWelcome]); 
@@ -1260,6 +1302,7 @@ function App() {
       const restored = (proj.blocks||[]).map((b,i)=>({ id:'b'+(++idCounter.current), index:i+1,
         summary:b.summary, code:b.code, label:b.label||'', status:b.status||'ok', formula:b.formula||'', newline:b.newline||false }));
       setBlocks(restored); setNewNames([]);
+      setDatasetKinds(Object.fromEntries(Object.keys(proj.datasets||{}).map(n => [n, 'uploaded'])));
       pushLog({ head:`[${now()}] import`, text:`Project loaded: ${restored.length} blocks, ${Object.keys(proj.datasets||{}).length} datasets. Rerun a block to refresh its output.` });
     } catch(err){ alert('Import failed: '+(err.message||err)); }
     setBusy(false);
@@ -1378,7 +1421,7 @@ function App() {
               h('button', { className:'ds-tool-btn action-btn', title:'Save all datasets', onClick:saveAllDatasets }, '⤓')),
             h('div', { style:{fontSize:'9px',color:'var(--ink-faint)',fontFamily:'var(--mono)',padding:'0 11px 4px',marginTop:'-4px'} }, 'CSV · Stata · SAS · SPSS · Excel · R'),
             h('div', { className:'ds-list', onMouseDown:beginDatasetAreaSelect, onContextMenu:e=>{ if(selectedDatasets.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'datasets-selected'}); } } },
-              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],newNames.includes(n),selectedDatasets.includes(n),{showPreview,setCtx,setSelectedDatasets,onSaveDataset,onRenameDataset,onDeleteDataset}))
+              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],datasetKinds[n] || (newNames.includes(n) ? 'created' : 'uploaded'),selectedDatasets.includes(n),{showPreview,setCtx,setSelectedDatasets,onSaveDataset,onRenameDataset,onDeleteDataset}))
                 : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete')))))),
 
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h') }),
@@ -1514,17 +1557,17 @@ function blockSquare(b, activeId, selectedIds, fns) {
       h('div',{className:'bbtn',title:'rerun',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.rerun(b.id)},'↻'),
       h('div',{className:'bbtn',title:'info',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.showBlockInfo(b.id)},'ⓘ')));
 }
-function dsItem(n, info, isNew, selected, fns) {
+function dsItem(n, info, kind, selected, fns) {
   const clickOpen = (e) => {
     if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); fns.setSelectedDatasets(ds=>ds.includes(n)?ds.filter(x=>x!==n):[...ds,n]); return; }
     fns.setSelectedDatasets([]); fns.showPreview(n);
   };
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  return h('div', { key:n, 'data-name':n, className:'ds-item'+(isNew?' new':'')+(selected?' selected':''),
+  return h('div', { key:n, 'data-name':n, className:'ds-item kind-'+(kind || 'uploaded')+(selected?' selected':''),
     onClick:clickOpen,
     onContextMenu:e=>{ e.preventDefault(); if (selected) fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { fns.setSelectedDatasets([]); fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm', title:n}, n),
-    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}${isNew?' · new':''}`),
+    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]} · ${kind || 'uploaded'}`),
     h('div',{className:'ds-actions'},
       h('button',{className:'ds-ico', title:'Preview', onMouseDown:stop, onClick:e=>{stop(e); fns.showPreview(n);}}, '👁'),
       h('button',{className:'ds-ico', title:'Save CSV', onMouseDown:stop, onClick:e=>{stop(e); fns.onSaveDataset(n);}}, '⇩'),
