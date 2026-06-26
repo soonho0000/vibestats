@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vibestats — WebR Statistical Analysis</title>
 <style>
+  /* 기본 다크 테마 변수 */
   :root {
     --bg: #0f1419; --panel: #1a212b; --panel-2: #232c38;
     --line: #2d3744; --line-bright: #3a4757;
@@ -14,9 +15,32 @@
     --mono: 'SF Mono','JetBrains Mono','Menlo','Consolas',monospace;
     --sans: 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   }
+
+  /* 세련된 라이트 테마 변수 */
+  body.light {
+    --bg: #f3f4f6; --panel: #ffffff; --panel-2: #f9fafb;
+    --line: #e5e7eb; --line-bright: #d1d5db;
+    --ink: #111827; --ink-dim: #4b5563; --ink-faint: #9ca3af;
+    --accent: #4f46e5; --accent-dim: #e0e7ff;
+    --blue: #2563eb; --amber: #d97706; --red: #dc2626; --green: #059669;
+  }
+
+  /* 부드러운 테마 전환 애니메이션 */
+  body, .window, .menubar, .ds-item, .nl-input, textarea, .interp-box, .modal {
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root { height: 100%; }
   body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13px; overflow: hidden; }
+
+  /* 글자 확대 모드 (Large Text Mode) */
+  body.large-text { font-size: 15px; }
+  body.large-text .menubar, body.large-text .load-btn, body.large-text .nl-go { font-size: 14px; }
+  body.large-text .ds-item { font-size: 13px; }
+  body.large-text .nl-input { font-size: 15px; }
+  body.large-text textarea, body.large-text .stream, body.large-text .interp-box, body.large-text .code-btns button { font-size: 14px; }
+  body.large-text .window > .titlebar { font-size: 11px; }
 
   #boot { position: fixed; inset: 0; z-index: 200; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; transition: opacity .5s; }
   #boot .mark { font-family: var(--mono); font-size: 26px; letter-spacing: 2px; }
@@ -26,11 +50,12 @@
   @keyframes slide { 0%{left:-40%} 100%{left:100%} }
   #boot .status { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); height: 14px; }
 
-  .menubar { height: 30px; display: flex; align-items: stretch; background: #141a22; border-bottom: 1px solid var(--line); font-size: 12px; position: relative; z-index: 60; }
+  .menubar { height: 30px; display: flex; align-items: stretch; background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 12px; position: relative; z-index: 60; }
   .menu { position: relative; }
   .menu > .mtitle { padding: 0 14px; height: 100%; display: flex; align-items: center; cursor: pointer; color: var(--ink-dim); font-family: var(--mono); }
-  .menu > .mtitle:hover, .menu.open > .mtitle { background: var(--panel-2); color: var(--ink); }
+  .menu > .mtitle:hover, .menu.open > .mtitle { background: var(--panel); color: var(--ink); }
   .menu .dropdown { position: absolute; top: 100%; left: 0; min-width: 230px; background: var(--panel); border: 1px solid var(--line-bright); border-radius: 0 0 6px 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  body.light .menu .dropdown { box-shadow: 0 8px 24px rgba(0,0,0,.08); }
   .menu .ditem { padding: 8px 12px; border-radius: 4px; cursor: pointer; color: var(--ink); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
   .menu .ditem:hover { background: var(--panel-2); color: var(--accent); }
   .menu .dsep { height: 1px; background: var(--line); margin: 4px 6px; }
@@ -38,14 +63,14 @@
   .menubar .right { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
   .menubar .right .logo { font-family: var(--mono); font-weight: 600; letter-spacing: 1px; }
   .menubar .right .logo b { color: var(--accent); } .menubar .right .logo .r { color: var(--blue); }
-  .menubar .right button { font-family: var(--mono); font-size: 11px; background: transparent; color: var(--ink-dim); border: 1px solid var(--line-bright); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
-  .menubar .right button:hover { color: var(--ink); border-color: var(--accent); }
+  .menubar .right button { display: flex; align-items: center; justify-content: center; font-family: var(--mono); background: transparent; color: var(--ink-dim); border: 1px solid var(--line-bright); border-radius: 4px; padding: 4px 8px; cursor: pointer; transition: all 0.2s; }
+  .menubar .right button:hover { color: var(--ink); border-color: var(--accent); background: var(--panel); }
 
   .hsplit, .vsplit { display: flex; width: 100%; height: 100%; min-height: 0; min-width: 0; }
   .vsplit { flex-direction: column; }
   .workspace { height: calc(100vh - 30px); }
 
-  .window { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; margin: 5px; min-height: 0; min-width: 0; overflow: hidden; }
+  .window { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; margin: 5px; min-height: 0; min-width: 0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
   .window > .titlebar { height: 26px; flex: 0 0 26px; display: flex; align-items: center; gap: 7px; padding: 0 8px 0 11px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.3px; color: var(--ink-dim); user-select: none; }
   .window > .titlebar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
   .window > .titlebar .grow { flex: 1; }
@@ -62,37 +87,46 @@
   .gutter.row::after { height: 2px; left: 14px; right: 14px; top: 2.5px; }
   .gutter:hover::after, .gutter.drag::after { background: var(--accent); }
 
-  .load-btn { margin: 9px 11px; font-family: var(--mono); font-size: 12px; background: var(--accent-dim); color: var(--ink); border: 1px solid var(--accent); border-radius: 5px; padding: 8px; cursor: pointer; text-align: center; }
-  .load-btn:hover { background: var(--accent); color: var(--bg); font-weight: 600; }
+  .load-btn { margin: 9px 11px; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--mono); font-size: 12px; background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent); border-radius: 5px; padding: 8px; cursor: pointer; transition: all 0.2s; }
+  body.light .load-btn { color: var(--accent); font-weight: 600; }
+  .load-btn:hover { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2); }
+  
   .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; align-content: start; }
-  .ds-item { font-family: var(--mono); font-size: 11px; padding: 6px 7px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 4px; cursor: pointer; }
-  .ds-item:hover { border-color: var(--line-bright); background: #28323f; }
+  .ds-item { display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 11px; padding: 8px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 5px; cursor: pointer; transition: all 0.15s; }
+  .ds-item:hover { border-color: var(--line-bright); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  body.light .ds-item:hover { background: #e2e8f0; }
   .ds-item.new { border-left-color: var(--accent); }
+  .ds-item .top-row { display: flex; align-items: center; gap: 6px; }
   .ds-item .nm { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ds-item .dim { color: var(--ink-faint); font-size: 10px; margin-top: 2px; }
+  .ds-item .dim { color: var(--ink-faint); font-size: 10px; padding-left: 20px; }
   .ds-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 11px; padding: 8px; grid-column: 1 / -1; }
 
   .nl-box { padding: 11px; display: flex; flex-direction: column; gap: 9px; }
   .nl-row { display: flex; gap: 8px; align-items: stretch; }
-  .nl-input { flex: 1; font-family: var(--mono); font-size: 13px; background: var(--bg); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 9px 11px; outline: none; }
-  .nl-input:focus { border-color: var(--accent); }
+  .nl-input { flex: 1; font-family: var(--mono); font-size: 13px; background: var(--bg); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 9px 11px; outline: none; transition: border-color 0.2s; }
+  .nl-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
   .nl-input::placeholder { color: var(--ink-faint); }
-  .nl-go { font-family: var(--mono); font-size: 12px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 0 16px; cursor: pointer; flex: 0 0 112px; }
-  .nl-go:hover { border-color: var(--accent); color: var(--accent); }
+  .nl-go { display: flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 0 16px; cursor: pointer; flex: 0 0 120px; transition: all 0.2s; }
+  .nl-go:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
   .nl-go:disabled { opacity: .5; cursor: default; }
   .interp-box { background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 5px; padding: 9px 11px; font-size: 12px; color: var(--ink-dim); line-height: 1.5; }
   .interp-box .restate { color: var(--ink); }
   .interp-box .formula { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--line); font-family: var(--mono); font-size: 13px; color: var(--amber); white-space: pre-wrap; }
+  
   .code-wrap { display: flex; gap: 8px; align-items: stretch; }
   .code-wrap textarea { flex: 1; min-height: 84px; height: 84px; resize: vertical; font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--bg); border: 1px solid var(--line-bright); border-radius: 5px; padding: 9px 11px; outline: none; line-height: 1.5; white-space: pre; overflow-x: auto; }
-  .code-wrap textarea:focus { border-color: var(--accent); }
-  .code-btns { display: flex; flex: 0 0 112px; flex-direction: column; gap: 6px; justify-content: stretch; align-self: stretch; }
-  .code-btns button { font-family: var(--mono); font-size: 11px; border-radius: 4px; padding: 8px 12px; cursor: pointer; border: 1px solid var(--line-bright); white-space: nowrap; flex: 1; }
+  .code-wrap textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  
+  .code-btns { display: flex; flex: 0 0 120px; flex-direction: column; gap: 6px; justify-content: stretch; align-self: stretch; }
+  .code-btns button { display: flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; border-radius: 4px; padding: 8px 12px; cursor: pointer; border: 1px solid var(--line-bright); white-space: nowrap; flex: 1; transition: all 0.2s; }
   .code-btns .run { background: var(--panel-2); color: var(--ink); }
   .code-btns .run:hover { border-color: var(--accent); color: var(--accent); }
-  .code-btns .runblock { background: var(--accent-dim); color: var(--ink); border-color: var(--accent); font-weight: 600; }
-  .code-btns .runblock:hover { background: var(--accent); color: var(--bg); }
+  body.light .code-btns .run:hover { background: #e2e8f0; }
+  .code-btns .runblock { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+  body.light .code-btns .runblock { color: var(--accent); }
+  .code-btns .runblock:hover { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2); }
   .code-btns button:disabled { opacity:.5; cursor:default; }
+  
   .parse-err { color: var(--red); font-family: var(--mono); font-size: 11px; }
 
   /* Blocks: 1.5cm squares flowing left→right */
@@ -102,11 +136,12 @@
   .rowlabel-inline { flex: 0 0 84px; display: flex; align-items: center; }
   .rowlabel-inline input { width: 100%; font-family: var(--mono); font-size: 10px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; outline: none; }
   .rowlabel-inline input:focus { border-color: var(--accent); }
-  .blk { width: 1.5cm; height: 1.5cm; background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 6px; padding: 4px 5px; cursor: grab; display: flex; flex-direction: column; position: relative; user-select: none; transition: box-shadow .12s, transform .04s; }
+  .blk { width: 1.5cm; height: 1.5cm; background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 6px; padding: 4px 5px; cursor: grab; display: flex; flex-direction: column; position: relative; user-select: none; transition: box-shadow .12s, transform .04s, border-color .15s; }
+  .blk:hover { border-color: var(--line-bright); }
   .blk.err { border-top-color: var(--red); }
   .blk.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .blk.selected { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(217,164,91,.55); }
-  .blk.dragging { box-shadow: 0 10px 26px rgba(0,0,0,.55); z-index: 40; cursor: grabbing; }
+  .blk.dragging { box-shadow: 0 10px 26px rgba(0,0,0,.25); z-index: 40; cursor: grabbing; }
   .blk .top { display: flex; align-items: center; }
   .blk .idx { font-family: var(--mono); font-size: 9px; color: var(--blue); font-weight: 700; }
   .blk.err .idx { color: var(--red); }
@@ -114,8 +149,8 @@
   .blk .st.ok { color: var(--green); } .blk .st.err { color: var(--red); } .blk .st.run { color: var(--amber); }
   .blk .mini { font-family: var(--mono); font-size: 7px; color: var(--ink-faint); line-height: 1.15; margin-top: 1px; flex: 1; overflow: hidden; }
   .blk .btns { display: flex; gap: 2px; }
-  .blk .bbtn { flex: 1; font-family: var(--mono); font-size: 9px; background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line); border-radius: 3px; padding: 1px 0; cursor: pointer; text-align: center; }
-  .blk .bbtn:hover { color: var(--ink); border-color: var(--accent); }
+  .blk .bbtn { flex: 1; font-family: var(--mono); font-size: 9px; background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line); border-radius: 3px; padding: 1px 0; cursor: pointer; text-align: center; transition: all 0.1s; }
+  .blk .bbtn:hover { color: var(--ink); border-color: var(--accent); background: var(--panel-2); }
   .blocks-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 12px; padding: 30px 12px; text-align: center; line-height: 1.8; width: 100%; }
   .select-box { position: fixed; z-index: 75; border: 1px dashed var(--accent); background: rgba(111,140,255,.16); pointer-events: none; }
 
@@ -126,15 +161,16 @@
   .entry:last-child { border-bottom: none; }
   .entry .ehead { font-size: 10px; color: var(--ink-faint); margin-bottom: 3px; }
   .entry.err .ehead { color: var(--red); }
-  .entry img { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; margin: 4px 0; background: #fff; }
+  .entry img { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; margin: 4px 0; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
   .entry .interp { color: var(--green); border-left: 2px solid var(--green); padding-left: 8px; margin-top: 5px; white-space: pre-wrap; }
   table.df { border-collapse: collapse; }
   table.df th, table.df td { border: 1px solid var(--line); padding: 3px 6px; text-align: right; white-space: nowrap; }
   table.df th { background: var(--panel-2); color: var(--ink-dim); position: sticky; top: 0; }
   table.df td { color: var(--ink); }
 
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 80; display: block; }
-  .modal { background: var(--panel); border: 1px solid var(--line-bright); border-radius: 8px; width: min(900px,88vw); height: min(640px,78vh); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); resize: both; min-width: 420px; min-height: 260px; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 80; display: block; backdrop-filter: blur(2px); }
+  .modal { background: var(--panel); border: 1px solid var(--line-bright); border-radius: 10px; width: min(900px,88vw); height: min(640px,78vh); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); resize: both; min-width: 420px; min-height: 260px; box-shadow: 0 24px 48px rgba(0,0,0,0.2); }
+  body.light .modal { box-shadow: 0 24px 48px rgba(0,0,0,0.1); }
   .modal.full { left: 4vw !important; top: 5vh !important; transform: none !important; width: 92vw !important; height: 88vh !important; max-height: 88vh; resize: none; }
   .modal h3 { font-family: var(--mono); font-size: 13px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); color: var(--accent); display: flex; gap: 6px; align-items: center; cursor: move; user-select: none; }
   .modal h3 .mtitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -146,6 +182,7 @@
   .modal .mfoot button { font-family: var(--mono); font-size: 12px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 4px; padding: 6px 16px; cursor: pointer; }
 
   .ctx { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--line-bright); border-radius: 6px; padding: 4px; min-width: 130px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  body.light .ctx { box-shadow: 0 6px 20px rgba(0,0,0,.08); }
   .ctx .item { font-family: var(--mono); font-size: 12px; padding: 7px 11px; border-radius: 4px; cursor: pointer; color: var(--ink); }
   .ctx .item:hover { background: var(--panel-2); }
   .ctx .item.danger:hover { background: #3a2424; color: var(--red); }
@@ -153,8 +190,9 @@
 
   .entry-actions { display: flex; gap: 6px; margin-top: 5px; }
   .entry-actions button { flex: 0 0 auto; min-width: 90px; padding: 3px 10px !important; font-size: 11px !important; }
-  .progress-bg { position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,.42); display: flex; align-items: center; justify-content: center; }
+  .progress-bg { position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,.42); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
   .progress-card { width: min(440px, 82vw); background: var(--panel); border: 1px solid var(--line-bright); border-radius: 10px; padding: 18px; box-shadow: 0 18px 44px rgba(0,0,0,.55); font-family: var(--mono); }
+  body.light .progress-card { box-shadow: 0 18px 44px rgba(0,0,0,.15); }
   .progress-card .ptitle { color: var(--accent); font-size: 13px; margin-bottom: 9px; }
   .progress-card .pmsg { color: var(--ink-dim); font-size: 11px; margin-bottom: 12px; line-height: 1.5; }
   .progress-card .pbar { height: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
@@ -192,6 +230,22 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 const h = React.createElement;
 
+// ===== 세련된 SVG 아이콘들 =====
+const iconSun = 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z';
+const iconMoon = 'M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z';
+const iconText = 'M4 7V4h16v3M9 20h6M12 4v16';
+const iconImport = 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12';
+const iconSparkle = 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z';
+const iconPlay = 'M5 3l14 9-14 9V3z'; // 채워진 아이콘
+const iconBlock = 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z';
+const iconTable = 'M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z';
+
+const Icon = ({ path, size=16, fill="none", stroke="currentColor", strokeWidth=2 }) =>
+  h('svg', {width:size, height:size, viewBox:'0 0 24 24', fill, stroke, strokeWidth, strokeLinecap:'round', strokeLinejoin:'round', style:{display:'inline-block', flexShrink:0}},
+    h('path', {d:path})
+  );
+
+
 let webR = null;
 const bootStatus = (t) => { const e = document.getElementById('bootStatus'); if (e) e.textContent = t; };
 
@@ -222,7 +276,7 @@ async function getSchema() {
 }
 
 // ===== LLM via secure backend proxy =====
-const OPENAI_MODEL = 'gpt-5.4-mini';
+const OPENAI_MODEL = 'gpt-4o-mini';
 const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
 
 const SYSTEM_PROMPT = `You convert a user's natural-language data-analysis request into runnable R code.
@@ -593,7 +647,15 @@ function App() {
   const [parseErr, setParseErr] = useState('');
   const [busy, setBusy] = useState(false);
   
-  // === THIS IS THE MODIFIED SECTION FOR THE WELCOME MESSAGE ===
+  // 테마 & 폰트 크기 상태 (새로 추가)
+  const [theme, setTheme] = useState('dark');
+  const [isLargeText, setIsLargeText] = useState(false);
+
+  // body 태그에 클래스 적용
+  useEffect(() => {
+    document.body.className = `${theme === 'light' ? 'light' : ''} ${isLargeText ? 'large-text' : ''}`.trim();
+  }, [theme, isLargeText]);
+
   const initialWelcome = {
     id: 0,
     head: '[Guide] Welcome to Vibestats!',
@@ -601,7 +663,6 @@ function App() {
   };
   const [resultEntries, setResultEntries] = useState([initialWelcome]);
   const [logEntries, setLogEntries] = useState([initialWelcome]);
-  // ============================================================
 
   const [modal, setModal] = useState(null);
   const [ctx, setCtx] = useState(null);
@@ -630,556 +691,4 @@ function App() {
   function hideProgress() { setProgress(null); }
 
   async function saveTextFile(defaultName, mime, content) {
-    if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({ suggestedName: defaultName, types:[{ description: defaultName, accept:{ [mime]: ['.' + defaultName.split('.').pop()] } }] });
-      const writable = await handle.createWritable();
-      await writable.write(content);
-      await writable.close();
-      return true;
-    }
-    const blob = new Blob([content], {type:mime});
-    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=defaultName; a.click(); URL.revokeObjectURL(a.href);
-    return false;
-  }
-  async function saveBlobFile(defaultName, mime, blob) {
-    if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({ suggestedName: defaultName, types:[{ description: defaultName, accept:{ [mime]: ['.' + defaultName.split('.').pop()] } }] });
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      return true;
-    }
-    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=defaultName; a.click(); URL.revokeObjectURL(a.href);
-    return false;
-  }
-
-  async function onFile(e) {
-    const f = e.target.files[0]; if (!f) return; e.target.value='';
-    if (!importInfo(f.name)) { pushLog({ head:`[${now()}] import`, error:true, text:'Unsupported file type: '+f.name }); return; }
-    let base = f.name.replace(/\.[^.]+$/,'').replace(/\W+/g,'_') || 'data';
-    if (/^\d/.test(base)) base = 'd_'+base;
-    let nm = base, i=1; while ((window._dsCache||{})[nm]) { i++; nm = base+i; }
-    setBusy(true); showProgress(`Importing dataset '${nm}'…`, 18, '파일 크기와 형식에 따라 걸리는 시간이 달라집니다.');
-    try {
-      await loadDataFile(nm, f); showProgress(`Refreshing dataset list…`, 82);
-      await refreshSchema();
-      const sc = window._dsCache[nm];
-      pushLog({ head:`[${now()}] load '${nm}'`, text:`Loaded ${sc.shape[0]} rows × ${sc.shape[1]} cols\nColumns: ${sc.columns.join(', ')}` });
-    } catch(err){ pushLog({ head:`[${now()}] load failed`, error:true, text: err.message||String(err) }); }
-    hideProgress(); setBusy(false);
-  }
-
-  async function onInterpretPrompt() {
-    const text = promptRef.current.value.trim(); if (!text) return;
-    setBusy(true); setParseErr(''); showProgress('Generating R code…', 35, '데이터 값은 보내지 않고 데이터셋/컬럼 구조만 사용합니다.');
-    try { const a = await parseNL(text); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||''); }
-    catch(e){ setParseErr(e.message||String(e)); }
-    hideProgress(); setBusy(false);
-  }
-
-  async function runCodeCore(code) {
-    return await executeR(code).catch(e => ({ error: e.message||String(e) }));
-  }
-
-  async function runCodeWithRepair(initialCode, summary) {
-    let currentCode = initialCode, currentSummary = summary, currentFormula = formula;
-    let res = null;
-    for (let attempt=1; attempt<=5; attempt++) {
-      showProgress(attempt===1 ? 'Running R code…' : `Repairing and retrying R code (${attempt}/5)…`, Math.min(88, 15 + attempt*14), '오류가 있으면 최대 5회까지 자동으로 코드를 수정해 다시 실행합니다.');
-      res = await runCodeCore(currentCode);
-      if (!res.error) return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:attempt>1 };
-      const msg = buildErrorLog(res.error);
-      setParseErr(`오류가 발생했습니다. 자동 수정 시도 ${attempt}/5\n${msg}`);
-      pushLog({ head:`[${now()}] auto-repair ${attempt}/5`, error:true, text:msg });
-      if (attempt===5) break;
-      try {
-        const fixed = await repairRCode(currentCode, currentSummary, res.error, attempt+1);
-        currentCode = fixed.code; currentSummary = fixed.summary || currentSummary; currentFormula = fixed.formula || currentFormula;
-        setCodeText(currentCode); setRestate(currentSummary); setFormula(currentFormula);
-        pushLog({ head:`[${now()}] code repaired ${attempt}/5`, text: fixed.reason || 'Code was revised automatically.' });
-      } catch(repairErr) {
-        res = { error: 'Auto-repair failed: ' + (repairErr.message || repairErr) };
-        setParseErr(`오류가 발생했고 자동 수정에도 실패했습니다.\n${buildErrorLog(res.error)}`);
-        break;
-      }
-    }
-    return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:true };
-  }
-
-  async function onRunOnly() {
-    const code = codeText.trim();
-    if (!code) { setParseErr('No code to run.'); return; }
-    setBusy(true); setParseErr('');
-    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40));
-    await refreshSchema();
-    dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code);
-    if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
-    hideProgress(); setBusy(false);
-  }
-
-  async function onRunBlock() {
-    const code = codeText.trim();
-    if (!code) { setParseErr('No code to run.'); return; }
-    const index = blocks.length + 1;
-    const id = 'b' + (++idCounter.current);
-    setBusy(true); setParseErr('');
-    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40));
-    await refreshSchema();
-    const status = rr.res.error ? 'err' : 'ok';
-    const block = { id, index, summary:rr.summary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||'', status, label:'', newline:false };
-    setBlocks(bs => [...bs, block]);
-    setActiveId(id);
-    dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code);
-    if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
-    if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
-    if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
-    hideProgress(); setBusy(false);
-  }
-
-  function dispatchOutput(res, head, code) {
-    const ts = `[${now()}] ${head}`;
-    if (res.error) {
-      pushLog({ head: ts + ' — FAILED', error:true, text: buildErrorLog(res.error) });
-      return;
-    }
-    if (res.savedDataset) {
-      pushLog({ head: ts + ' — dataset saved', text:`Raw data result was saved as dataset '${res.savedDataset}' and was not printed in Results.` });
-    }
-    if (res.newDataset && res.newDataset !== res.savedDataset) {
-      pushLog({ head: ts + ' — dataset created', text:`New dataset created: '${res.newDataset}'.` });
-    }
-    if ((res.resultText && res.resultText.trim()) || res.plot) {
-      pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', plot: res.plot || null,
-                   _code: code, _summary: head, resultKey: res.resultKey || null });
-    }
-    if (res.consoleText && res.consoleText.trim()) {
-      pushLog({ head: ts, text: res.consoleText.trim() });
-    } else if (!((res.resultText&&res.resultText.trim())||res.plot) && !res.savedDataset) {
-      pushLog({ head: ts, text: '(no output)' });
-    }
-  }
-
-  async function onInterpretResult(entryId) {
-    setResultEntries(es => es.map(e => e.id===entryId ? {...e, interpreting:true} : e));
-    const en = resultEntries.find(e=>e.id===entryId);
-    if (!en) return;
-    try {
-      const txt = await interpretResult(en._summary||'', en._code||'', en.text||'(plot output)');
-      setResultEntries(es => es.map(e => e.id===entryId ? {...e, interp:txt, interpreting:false} : e));
-    } catch(e) {
-      setResultEntries(es => es.map(x => x.id===entryId ? {...x, interp:'Interpretation failed: '+(e.message||e), interpreting:false} : x));
-    }
-  }
-  async function onSaveResult(entryId) {
-    const en = resultEntries.find(e=>e.id===entryId);
-    if (!en || !en.resultKey) return;
-    const name = prompt('저장할 데이터셋 이름을 입력하세요:', 'saved_result');
-    if (name===null) return;
-    try {
-      const finalName = await saveStoredResultAsDataset(en.resultKey, name);
-      await refreshSchema();
-      setNewNames(p=>p.includes(finalName)?p:[...p,finalName]);
-      pushLog({ head:`[${now()}] result saved`, text:`Result saved as dataset '${finalName}'.` });
-    } catch(err) { pushLog({ head:`[${now()}] result save failed`, error:true, text:err.message||String(err) }); }
-  }
-
-  async function rerun(id) {
-    const b = blocksRef.current.find(x=>x.id===id); if (!b) return;
-    setBlocks(bs=>bs.map(x=>x.id===id?{...x,status:'run'}:x));
-    const rr = await runCodeWithRepair(b.code, b.summary);
-    await refreshSchema();
-    const status = rr.res.error ? 'err' : 'ok';
-    setBlocks(bs=>bs.map(x=>x.id===id?{...x,status,code:rr.code,summary:rr.summary||x.summary,formula:rr.formula||x.formula}:x));
-    setActiveId(id);
-    dispatchOutput(rr.res, `#${b.index} ${rr.summary||b.summary||''} (rerun)`.trim(), rr.code);
-    if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
-    hideProgress();
-  }
-  function showBlockInfo(id){ const b=blocksRef.current.find(x=>x.id===id); if(b) setModal({ title:`#${b.index} block`, body:`${b.label?'Label: '+b.label+'\n\n':''}Prompt:\n${b.summary || '(none)'}\n\nFormula:\n${b.formula || '(none)'}\n\nCode:\n${b.code}` }); }
-  function deleteBlock(id){ setBlocks(bs=>bs.filter(x=>x.id!==id).map((b,i)=>({...b,index:i+1}))); setSelectedIds(ids=>ids.filter(x=>x!==id)); }
-  function deleteSelectedBlocks(){ setBlocks(bs=>bs.filter(x=>!selectedIds.includes(x.id)).map((b,i)=>({...b,index:i+1}))); setSelectedIds([]); }
-  function setLabel(id,v){ setBlocks(bs=>bs.map(b=>b.id===id?{...b,label:v}:b)); }
-  function toggleNewline(id,on){ setBlocks(bs=>bs.map(b=>b.id===id?{...b,newline:on}:b)); }
-
-  async function showPreview(name) {
-    const sc=(window._dsCache||{})[name]; const sh=sc?sc.shape:[0,0];
-    let start=1, end=Math.min(10000, sh[0] || 10000);
-    if (sh[0] > 10000) {
-      const ans = prompt(`${name} has ${sh[0]} rows. Enter row range to open (example: 1-10000):`, `1-10000`);
-      if (ans === null) return;
-      const m = ans.match(/(\d+)\s*[-:,~]\s*(\d+)/);
-      if (m) { start = parseInt(m[1],10); end = parseInt(m[2],10); }
-      else { const n = parseInt(ans,10); if (Number.isFinite(n)) { start = 1; end = n; } }
-      if (end - start + 1 > 10000 && !confirm('More than 10,000 rows may be slow. Continue?')) return;
-    }
-    let html=''; try{ html=await previewHTML(name,start,end);}catch(e){ html = `<div style="color:var(--red)">${String(e.message||e)}</div>`; }
-    setModal({ title:`${name}  (${sh[0]} × ${sh[1]}) rows ${start}-${Math.min(end, sh[0])}`, html });
-  }
-  async function onDeleteDataset(name) {
-    await deleteDataset(name); await refreshSchema();
-    setNewNames(p=>p.filter(n=>n!==name));
-    setSelectedDatasets(ds=>ds.filter(x=>x!==name));
-  }
-  async function onDeleteSelectedDatasets() {
-    if (!selectedDatasets.length) return;
-    if (!confirm(`Delete ${selectedDatasets.length} selected datasets?`)) return;
-    for (const n of selectedDatasets) await deleteDataset(n);
-    await refreshSchema();
-    setNewNames(p=>p.filter(n=>!selectedDatasets.includes(n)));
-    pushLog({ head:`[${now()}] datasets deleted`, text:`Deleted: ${selectedDatasets.join(', ')}` });
-    setSelectedDatasets([]);
-  }
-  async function onRenameDataset(oldName) {
-    const proposed = prompt(`Rename dataset '${oldName}' to:`, oldName);
-    if (proposed===null) return;
-    let nm = proposed.trim().replace(/\W+/g,'_').replace(/^_+|_+$/g,'');
-    if (!nm) { alert('Dataset name cannot be empty.'); return; }
-    if (/^\d/.test(nm)) nm = 'd_' + nm;
-    try {
-      await webR.evalRVoid(`local({ .env <- .nlstat_env; old <- ${JSON.stringify(oldName)}; new <- ${JSON.stringify(nm)}; if (!exists(old, envir=.env, inherits=FALSE)) stop("dataset not found"); if (exists(new, envir=.env, inherits=FALSE)) stop("target name already exists"); assign(new, get(old, envir=.env), envir=.env); rm(list=old, envir=.env) })`);
-      await refreshSchema();
-      setNewNames(p=>p.map(x=>x===oldName?nm:x));
-      setSelectedDatasets(p=>p.map(x=>x===oldName?nm:x));
-      pushLog({ head:`[${now()}] dataset renamed`, text:`${oldName} → ${nm}` });
-    } catch(err) { alert('Rename failed: '+(err.message||err)); }
-  }
-  async function onSaveDataset(name) {
-    const csv = await exportCSV(name);
-    const blob = new Blob([csv], {type:'text/csv'});
-    await saveBlobFile(name+'.csv', 'text/csv', blob);
-  }
-
-  async function saveAllDatasets() {
-    const names = await allDatasetNames();
-    if (!names.length) { alert('No datasets to save.'); return; }
-    if (window.showDirectoryPicker) {
-      const dir = await window.showDirectoryPicker();
-      for (const n of names) {
-        const handle = await dir.getFileHandle(n+'.csv', {create:true});
-        const writable = await handle.createWritable();
-        await writable.write(await exportCSV(n));
-        await writable.close();
-      }
-      pushLog({ head:`[${now()}] save all datasets`, text:`Saved ${names.length} CSV files to the selected folder.` });
-    } else {
-      for (const n of names) { await onSaveDataset(n); await new Promise(r=>setTimeout(r,150)); }
-      alert('Your browser does not support folder selection here, so each CSV was downloaded separately. Chrome/Edge support selecting a folder.');
-    }
-  }
-  async function saveProject() {
-    const names = await allDatasetNames(); const datasets={};
-    for (const n of names) datasets[n] = await exportCSV(n);
-    const proj = { version:3, app:'Vibestats', savedAt:new Date().toISOString(),
-      blocks: blocks.map(b=>({index:b.index,summary:b.summary,code:b.code,label:b.label,status:b.status,formula:b.formula,newline:b.newline})),
-      datasets };
-    await saveTextFile('vibestats_project.json', 'application/json', JSON.stringify(proj,null,2));
-  }
-  async function newProject() {
-    if (!confirm('Clear everything and start a new project?')) return;
-    const names = await allDatasetNames();
-    for (const n of names) await deleteDataset(n);
-    await refreshSchema();
-    setBlocks([]); setNewNames([]); setCodeText(''); setRestate(''); setFormula('');
-    
-    // === INITIALIZE WITH WELCOME MESSAGE ===
-    setResultEntries([initialWelcome]); 
-    setLogEntries([initialWelcome]); 
-    // =======================================
-    
-    setActiveId(null);
-  }
-  function importProjectClick(){ projRef.current.click(); }
-  async function onImportProject(e) {
-    const f=e.target.files[0]; if(!f) return; e.target.value='';
-    setBusy(true);
-    try {
-      const proj = JSON.parse(await f.text());
-      const names = await allDatasetNames(); for (const n of names) await deleteDataset(n);
-      for (const [n,csv] of Object.entries(proj.datasets||{})) {
-        await webR.FS.writeFile('/tmp/'+n+'.csv', new TextEncoder().encode(csv));
-        await webR.evalRVoid(`assign(${JSON.stringify(n)}, utils::read.csv(${JSON.stringify('/tmp/'+n+'.csv')}, stringsAsFactors=FALSE), envir=.nlstat_env)`);
-      }
-      await refreshSchema();
-      const restored = (proj.blocks||[]).map((b,i)=>({ id:'b'+(++idCounter.current), index:i+1,
-        summary:b.summary, code:b.code, label:b.label||'', status:b.status||'ok', formula:b.formula||'', newline:b.newline||false }));
-      setBlocks(restored); setNewNames([]);
-      pushLog({ head:`[${now()}] import`, text:`Project loaded: ${restored.length} blocks, ${Object.keys(proj.datasets||{}).length} datasets. Rerun a block to refresh its output.` });
-    } catch(err){ alert('Import failed: '+(err.message||err)); }
-    setBusy(false);
-  }
-  async function exportRCode() {
-    if (!blocks.length) { alert('No blocks to export.'); return; }
-    const lines = [];
-    lines.push('# Vibestats exported R code');
-    lines.push('# Exported: ' + new Date().toISOString());
-    lines.push('# Non-code information is written as comments.');
-    lines.push('');
-    let currentLabel = '';
-    blocks.forEach((b, i) => {
-      if ((i===0 || b.newline) && b.label) currentLabel = b.label;
-      if (i===0 || b.newline) {
-        lines.push('');
-        lines.push('# ============================================================');
-        lines.push('# Label: ' + (currentLabel || '(no label)'));
-        lines.push('# ============================================================');
-      }
-      lines.push('');
-      lines.push(`# Block #${b.index}`);
-      lines.push('# Prompt: ' + (b.summary || '(none)').replace(/\n/g, '\n#         '));
-      lines.push('# Formula: ' + (b.formula || '(none)').replace(/\n/g, '\n#          '));
-      lines.push('# Status: ' + (b.status || '(unknown)'));
-      lines.push(b.code || '# (no code)');
-    });
-    await saveTextFile('vibestats_blocks.R', 'text/x-r-source', lines.join('\n') + '\n');
-  }
-
-  function fullscreen(title, kind) {
-    if (kind==='result') setModal({ title, full:true, streamKind:'result', entries:resultEntries });
-    else if (kind==='log') setModal({ title, full:true, streamKind:'log', entries:logEntries });
-    else if (kind==='blocks') setModal({ title, full:true, blocksView:true });
-  }
-
-  function beginBlockAreaSelect(e) {
-    if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
-    if (!e.target.classList.contains('blocks-scroll') && !e.target.classList.contains('blocks-flow')) return;
-    e.preventDefault();
-    const sx=e.clientX, sy=e.clientY;
-    setSelectedIds([]);
-    const move = (ev) => {
-      const x=Math.min(sx, ev.clientX), y=Math.min(sy, ev.clientY);
-      const w=Math.abs(ev.clientX-sx), ht=Math.abs(ev.clientY-sy);
-      setSelectionBox({x,y,w,h:ht});
-    };
-    const up = (ev) => {
-      document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
-      const x=Math.min(sx, ev.clientX), y=Math.min(sy, ev.clientY), r=x+Math.abs(ev.clientX-sx), b=y+Math.abs(ev.clientY-sy);
-      const ids=[];
-      document.querySelectorAll('.blk').forEach(el => {
-        const br=el.getBoundingClientRect();
-        if (br.left < r && br.right > x && br.top < b && br.bottom > y) ids.push(el.getAttribute('data-id'));
-      });
-      setSelectedIds(ids.filter(Boolean));
-      setSelectionBox(null);
-    };
-    document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
-  }
-
-  function beginDatasetAreaSelect(e) {
-    if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
-    if (!e.target.classList.contains('ds-list')) return;
-    e.preventDefault();
-    const sx=e.clientX, sy=e.clientY;
-    setSelectedDatasets([]);
-    const move = (ev) => {
-      const x=Math.min(sx, ev.clientX), y=Math.min(sy, ev.clientY);
-      const w=Math.abs(ev.clientX-sx), ht=Math.abs(ev.clientY-sy);
-      setSelectionBox({x,y,w,h:ht});
-    };
-    const up = (ev) => {
-      document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
-      const x=Math.min(sx, ev.clientX), y=Math.min(sy, ev.clientY), r=x+Math.abs(ev.clientX-sx), b=y+Math.abs(ev.clientY-sy);
-      const names=[];
-      document.querySelectorAll('.ds-item').forEach(el => {
-        const br=el.getBoundingClientRect();
-        if (br.left < r && br.right > x && br.top < b && br.bottom > y) names.push(el.getAttribute('data-name'));
-      });
-      setSelectedDatasets(names.filter(Boolean));
-      setSelectionBox(null);
-    };
-    document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
-  }
-
-  const dsNames = Object.keys(schema);
-
-  return h('div', { style:{height:'100%'} },
-    // Menu bar
-    h('div', { className:'menubar', onClick:e=>e.stopPropagation() },
-      h(MenuComp, { id:'file', label:'File', openId:openMenu, setOpenId:setOpenMenu, items:[
-        { label:'New Project', onClick:newProject },
-        { label:'Import Project…', onClick:importProjectClick },
-        { sep:true },
-        { label:'Save Project As… (.json)', onClick:saveProject },
-        { label:'Save All Datasets To Folder… (.csv)', onClick:saveAllDatasets },
-      ]}),
-      h('div', { className:'spacer' }),
-      h('div', { className:'right' },
-        h('span', { className:'logo' }, 'Vibe', h('b',null,'stats'), ' · ', h('span',{className:'r'},'WebR')))),
-
-    h('input', { ref:fileRef, type:'file', accept:'.csv,.tsv,.dta,.sav,.por,.sas7bdat,.xpt,.xls,.xlsx,.rds,.rdata,.rda', style:{display:'none'}, onChange:onFile }),
-    h('input', { ref:projRef, type:'file', accept:'.json', style:{display:'none'}, onChange:onImportProject }),
-
-    h('div', { className:'hsplit workspace' },
-      h('div', { className:'vsplit', style:{flex:'0 0 230px'} },
-        h('div', { className:'window', style:{flex:'1 1 auto'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Datasets', h('span',{className:'grow'})),
-          h('div', { className:'content' },
-            h('button', { className:'load-btn', onClick:()=>fileRef.current.click() }, '＋ Import Data'),
-            h('div', { style:{fontSize:'9px',color:'var(--ink-faint)',fontFamily:'var(--mono)',padding:'0 11px 4px',marginTop:'-4px'} }, 'CSV · Stata · SAS · SPSS · Excel · R'),
-            h('div', { className:'ds-list', onMouseDown:beginDatasetAreaSelect, onContextMenu:e=>{ if(selectedDatasets.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'datasets-selected'}); } } },
-              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],newNames.includes(n),selectedDatasets.includes(n),showPreview,setCtx,setSelectedDatasets))
-                : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete')))))),
-
-      h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h') }),
-
-      h('div', { className:'vsplit', style:{flex:'1 1 auto'} },
-        h('div', { className:'window', style:{flex:'1 1 auto'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Results',
-            h('span',{className:'grow'}),
-            h('button',{className:'tbtn', title:'Clear', onClick:()=>setResultEntries([])},'clear'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Results','result')},'⛶')),
-          h('div', { className:'content' },
-            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSaveResult:onSaveResult }))),
-        h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
-        h('div', { className:'window', style:{flex:'0 0 270px'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt → R Code', h('span',{className:'grow'})),
-          h('div', { className:'content', style:{overflow:'auto'} },
-            h('div', { className:'nl-box' },
-              h('div', { className:'nl-row' },
-                h('input', { className:'nl-input', ref:promptRef, placeholder:'Enter prompt',
-                  onKeyDown:e=>{ if(e.key==='Enter') onInterpretPrompt(); } }),
-                h('button', { className:'nl-go', onClick:onInterpretPrompt, disabled:busy }, busy?'…':'Generate')),
-              (restate || formula) && h('div', { className:'interp-box' },
-                restate && h('div',{className:'restate'}, restate),
-                formula && h('div',{className:'formula'}, formula)),
-              h('div', { className:'code-wrap' },
-                h('textarea', { value:codeText, placeholder:'Enter code', spellCheck:false, onChange:e=>setCodeText(e.target.value) }),
-                h('div', { className:'code-btns' },
-                  h('button', { className:'run', onClick:onRunOnly, disabled:busy }, 'Run'),
-                  h('button', { className:'runblock', onClick:onRunBlock, disabled:busy }, 'Run + Block'))),
-              parseErr && h('div', { className:'parse-err' }, parseErr)))))
-    ,
-      h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
-
-      h('div', { className:'vsplit', style:{flex:'0 0 360px'} },
-        h('div', { className:'window', style:{flex:'1 1 50%'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
-            h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — fixed order · drag down for new row'),
-            h('span',{className:'grow'}),
-            h('button',{className:'tbtn', title:'Export R code', onClick:exportRCode},'rcode'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Blocks','blocks')},'⛶')),
-          h('div', { className:'content' },
-            h('div', { className:'blocks-scroll', onMouseDown:beginBlockAreaSelect, onContextMenu:e=>{ if(selectedIds.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'blocks-selected'}); } } },
-              blocks.length ? h('div',{className:'blocks-flow'}, renderBlocksFlow(blocks, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds}))
-                : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run + Block".')))),
-        h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v') }),
-        h('div', { className:'window', style:{flex:'1 1 50%'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot',style:{background:'var(--amber)'}}), 'Log',
-            h('span',{className:'grow'}),
-            h('button',{className:'tbtn', title:'Clear', onClick:()=>setLogEntries([])},'clear'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Log','log')},'⛶')),
-          h('div', { className:'content' },
-            h(StreamPane, { entries:logEntries, kind:'log' })))) ),
-
-    modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
-      h('div', { className:'modal'+(modal.full?' full':'') },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
-        modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null}))
-          : modal.blocksView ? h('div',{className:'mbody',style:{padding:'14px'}}, h('div',{className:'blocks-flow'}, renderBlocksFlow(blocksRef.current, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds})))
-          : modal.html ? h('div',{className:'mbody', dangerouslySetInnerHTML:{__html:modal.html}})
-          : h('div',{className:'mbody'}, modal.body),
-        h('div', { className:'mfoot' }, h('button',{onClick:()=>setModal(null)},'Close')))),
-
-    selectionBox && h('div', { className:'select-box', style:{left:selectionBox.x, top:selectionBox.y, width:selectionBox.w, height:selectionBox.h} }),
-
-    progress && h('div', { className:'progress-bg' },
-      h('div', { className:'progress-card' },
-        h('div', { className:'ptitle' }, 'Processing…'),
-        h('div', { className:'pmsg' }, progress.text),
-        h('div', { className:'pbar' }, h('i', { style:{width:Math.max(8, Math.min(100, progress.pct || 25)) + '%'} })),
-        h('div', { className:'pnote' }, progress.note || '작업을 처리하는 중입니다.'))),
-
-    ctx && h('div', { className:'ctx', style:{left:ctx.x, top:ctx.y}, onClick:e=>e.stopPropagation() },
-      ctx.kind==='dataset'
-        ? [ h('div',{key:1,className:'item', onClick:()=>{ showPreview(ctx.name); setCtx(null); }},'Preview'),
-            h('div',{key:2,className:'item', onClick:()=>{ onSaveDataset(ctx.name); setCtx(null); }},'Save'),
-            h('div',{key:3,className:'item', onClick:()=>{ onRenameDataset(ctx.name); setCtx(null); }},'Rename'),
-            selectedDatasets.length > 1 && selectedDatasets.includes(ctx.name)
-              ? h('div',{key:4,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`)
-              : h('div',{key:5,className:'item danger', onClick:()=>{ if(confirm(`Delete '${ctx.name}'?`)) onDeleteDataset(ctx.name); setCtx(null); }},'Delete') ]
-        : ctx.kind==='datasets-selected'
-          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`) ]
-        : ctx.kind==='blocks-selected'
-          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }},`Delete ${selectedIds.length} blocks`) ]
-          : [ h('div',{key:1,className:'item danger', onClick:()=>{ if (selectedIds.length > 1 && selectedIds.includes(ctx.id)) deleteSelectedBlocks(); else deleteBlock(ctx.id); setCtx(null); }}, selectedIds.length > 1 && selectedIds.includes(ctx.id) ? `Delete ${selectedIds.length} blocks` : 'Delete block') ])
-  );
-}
-
-function MenuComp({ label, items, openId, setOpenId, id }) {
-  const open = openId === id;
-  return h('div', { className:'menu'+(open?' open':''), onMouseEnter:()=>{ if(openId) setOpenId(id); } },
-    h('div', { className:'mtitle', onClick:()=> setOpenId(open?null:id) }, label),
-    open && h('div', { className:'dropdown' },
-      items.map((it,i)=> it.sep ? h('div',{key:i,className:'dsep'})
-        : h('div',{key:i,className:'ditem', onClick:()=>{ setOpenId(null); it.onClick(); }}, it.label))));
-}
-
-function renderBlocksFlow(blocks, activeId, selectedIds, fns) {
-  const out = [];
-  blocks.forEach((b, i) => {
-    if (b.newline && i!==0) out.push(h('div',{key:'br'+b.id,className:'row-break'}));
-    if (i===0 || b.newline) out.push(h('div',{key:'lb'+b.id,className:'rowlabel-inline'},
-      h('input',{ placeholder:'label', value:b.label, onChange:e=>fns.setLabel(b.id,e.target.value), onMouseDown:e=>e.stopPropagation() })));
-    out.push(blockSquare(b, activeId, selectedIds, fns));
-  });
-  return out;
-}
-function blockSquare(b, activeId, selectedIds, fns) {
-  const onDown = (e) => {
-    if (e.button!==0) return;
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault(); e.stopPropagation();
-      fns.setSelectedIds(ids => ids.includes(b.id) ? ids.filter(x=>x!==b.id) : [...ids, b.id]);
-      fns.setActiveId(b.id);
-      return;
-    }
-    fns.setSelectedIds([]); fns.setActiveId(b.id);
-    const el = e.currentTarget;
-    const startX = e.clientX, startY = e.clientY;
-    let moved=false, raf=null, curDX=0, curDY=0;
-    const apply = () => { el.style.transform = `translate(${curDX}px, ${curDY}px)`; raf=null; };
-    const move = (ev) => {
-      curDX = ev.clientX-startX; curDY = ev.clientY-startY;
-      if (Math.abs(curDX)>4 || Math.abs(curDY)>4) { if(!moved){moved=true; el.classList.add('dragging');} }
-      if (moved && !raf) raf = requestAnimationFrame(apply);
-    };
-    const up = (ev) => {
-      document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
-      if (raf) cancelAnimationFrame(raf);
-      el.classList.remove('dragging'); el.style.transform='';
-      if (moved) { const dy = ev.clientY-startY; if (dy>28) fns.toggleNewline(b.id,true); else if (dy<-28) fns.toggleNewline(b.id,false); }
-    };
-    document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
-  };
-  return h('div', { key:b.id, 'data-id':b.id, className:'blk '+(b.status==='err'?'err ':'')+(b.id===activeId?'active ':'')+(selectedIds.includes(b.id)?'selected':''),
-    title:b.summary, onMouseDown:onDown,
-    onContextMenu:e=>{ e.preventDefault(); fns.setCtx({x:e.clientX,y:e.clientY,kind:'block',id:b.id}); } },
-    h('div',{className:'top'}, h('span',{className:'idx'},'#'+b.index),
-      h('span',{className:'st '+(b.status==='run'?'run':b.status==='ok'?'ok':'err')}, b.status==='run'?'…':b.status==='ok'?'✓':'✗')),
-    h('div',{className:'mini'}, (b.summary||'').slice(0,22)),
-    h('div',{className:'btns'},
-      h('div',{className:'bbtn',title:'rerun',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.rerun(b.id)},'↻'),
-      h('div',{className:'bbtn',title:'info',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.showBlockInfo(b.id)},'ⓘ')));
-}
-function dsItem(n, info, isNew, selected, showPreview, setCtx, setSelectedDatasets) {
-  return h('div', { key:n, 'data-name':n, className:'ds-item'+(isNew?' new':'')+(selected?' selected':''),
-    onClick:e=>{
-      if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); setSelectedDatasets(ds=>ds.includes(n)?ds.filter(x=>x!==n):[...ds,n]); return; }
-      setSelectedDatasets([]); showPreview(n);
-    },
-    onContextMenu:e=>{ e.preventDefault(); if (selected) setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { setSelectedDatasets([]); setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
-    h('div',{className:'nm'}, n), h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}${isNew?' · new':''}`));
-}
-
-(async () => {
-  try {
-    await bootWebR();
-    const boot = document.getElementById('boot');
-    boot.style.opacity='0'; setTimeout(()=>boot.remove(), 500);
-    createRoot(document.getElementById('root')).render(h(App));
-  } catch(e) { bootStatus('Init failed: '+(e.message||e)); console.error(e); }
-})();
-</script>
-</body>
-</html>
+    if (window.
