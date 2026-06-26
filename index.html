@@ -222,9 +222,6 @@ async function getSchema() {
 }
 
 // ===== LLM via secure backend proxy =====
-// Browser code no longer stores or sees the OpenAI API key.
-// Change this endpoint if your backend route is different. The backend should keep
-// OPENAI_API_KEY in a server-side environment variable and forward requests to OpenAI.
 const OPENAI_MODEL = 'gpt-5.4-mini';
 const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
 
@@ -307,7 +304,6 @@ Rules:
   return { code:String(d.code), summary:String(d.summary || summary || ''), formula:String(d.formula || ''), reason:String(d.reason || '') };
 }
 
-// Interpret an analysis result in very simple natural language (Korean)
 async function interpretResult(summary, code, resultText) {
   const msg = [{ role:'user', content:
 `아래 R 통계분석 결과를 통계 비전공자도 이해할 수 있게 한국어로 아주 쉽고 직관적으로 해석해 주세요.
@@ -325,7 +321,6 @@ ${resultText.slice(0, 4000)}` }];
   return (await callLLM(msg, false)).trim();
 }
 
-// ===== Execute R: result vs console split, plus plot =====
 async function executeR(code) {
   const before = new Set(Object.keys(window._dsCache || {}));
   const escaped = code.replace(/\\/g,'\\\\').replace(/"/g,'\\"');
@@ -419,8 +414,6 @@ async function saveStoredResultAsDataset(resultKey, requestedName) {
   return finalName;
 }
 
-// ===== Multi-format data import =====
-// CSV stays base R; others use haven(Stata/SAS/SPSS) / readxl(Excel) / readRDS+load(R)
 function importInfo(fname) {
   const ext = (fname.split('.').pop()||'').toLowerCase();
   const map = {
@@ -445,7 +438,6 @@ async function loadDataFile(name, file) {
   if (!info) throw new Error('Unsupported file type: ' + file.name);
   const ext = (file.name.split('.').pop()||'').toLowerCase();
   const path = '/tmp/' + name + '.' + ext;
-  // text formats vs binary
   if (ext==='csv' || ext==='tsv') {
     await webR.FS.writeFile(path, new TextEncoder().encode(await file.text()));
   } else {
@@ -486,7 +478,6 @@ async function exportCSV(name) {
 }
 async function allDatasetNames() { await getSchema(); return Object.keys(window._dsCache||{}); }
 
-// ===== Error analysis (English) =====
 function analyzeError(msg) {
   const m = msg.replace(/^R execution error:\s*/, '').trim();
   const rules = [
@@ -533,9 +524,6 @@ function buildErrorLog(msg) {
   return `■ Original: ${msg.replace(/^R execution error:\s*/,'')}\n\n■ Cause:\n${a.cause}\n\n■ Suggested fix:\n${a.fix}`;
 }
 
-// =====================================================================
-//  React UI
-// =====================================================================
 function now() { return new Date().toLocaleTimeString('en-US', {hour12:false}); }
 let entryCounter = 0;
 
@@ -578,7 +566,6 @@ function useSplitter() {
   }, []);
 }
 
-// Accumulating stream pane (result or log). Auto-scrolls to bottom.
 function StreamPane({ entries, kind, onInterpret, onSaveResult }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [entries.length]);
@@ -605,8 +592,17 @@ function App() {
   const [formula, setFormula] = useState('');
   const [parseErr, setParseErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [resultEntries, setResultEntries] = useState([]);
-  const [logEntries, setLogEntries] = useState([]);
+  
+  // === THIS IS THE MODIFIED SECTION FOR THE WELCOME MESSAGE ===
+  const initialWelcome = {
+    id: 0,
+    head: '[Guide] Welcome to Vibestats!',
+    text: "1. If you are a first-time user, follow these steps to get started.\n2. To download the example dataset, copy: Sample_data <- read.csv(\"mtcars_sample.csv\")\n   paste it into the 'Enter code' input box, and click 'Run+Block'.\n3. To see the summary statistics, type: 'Show me the summary statistics for Sample_data'\n   in the 'Enter prompt' box and click 'Generate'.\n4. Once the code appears in the 'Enter code' field, simply click 'Run+Block'."
+  };
+  const [resultEntries, setResultEntries] = useState([initialWelcome]);
+  const [logEntries, setLogEntries] = useState([initialWelcome]);
+  // ============================================================
+
   const [modal, setModal] = useState(null);
   const [ctx, setCtx] = useState(null);
   const [activeId, setActiveId] = useState(null);
@@ -657,7 +653,6 @@ function App() {
     return false;
   }
 
-  // ---- file load (multi-format) ----
   async function onFile(e) {
     const f = e.target.files[0]; if (!f) return; e.target.value='';
     if (!importInfo(f.name)) { pushLog({ head:`[${now()}] import`, error:true, text:'Unsupported file type: '+f.name }); return; }
@@ -674,7 +669,6 @@ function App() {
     hideProgress(); setBusy(false);
   }
 
-  // ---- prompt → code ----
   async function onInterpretPrompt() {
     const text = promptRef.current.value.trim(); if (!text) return;
     setBusy(true); setParseErr(''); showProgress('Generating R code…', 35, '데이터 값은 보내지 않고 데이터셋/컬럼 구조만 사용합니다.');
@@ -712,7 +706,6 @@ function App() {
     return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:true };
   }
 
-  // Run only (no block)
   async function onRunOnly() {
     const code = codeText.trim();
     if (!code) { setParseErr('No code to run.'); return; }
@@ -724,7 +717,6 @@ function App() {
     hideProgress(); setBusy(false);
   }
 
-  // Run + create block
   async function onRunBlock() {
     const code = codeText.trim();
     if (!code) { setParseErr('No code to run.'); return; }
@@ -745,7 +737,6 @@ function App() {
     hideProgress(); setBusy(false);
   }
 
-  // Route output: result text → result pane; console/errors → log pane
   function dispatchOutput(res, head, code) {
     const ts = `[${now()}] ${head}`;
     if (res.error) {
@@ -769,7 +760,6 @@ function App() {
     }
   }
 
-  // interpret/save a result entry
   async function onInterpretResult(entryId) {
     setResultEntries(es => es.map(e => e.id===entryId ? {...e, interpreting:true} : e));
     const en = resultEntries.find(e=>e.id===entryId);
@@ -861,7 +851,6 @@ function App() {
     await saveBlobFile(name+'.csv', 'text/csv', blob);
   }
 
-  // ---- File menu ----
   async function saveAllDatasets() {
     const names = await allDatasetNames();
     if (!names.length) { alert('No datasets to save.'); return; }
@@ -893,7 +882,13 @@ function App() {
     for (const n of names) await deleteDataset(n);
     await refreshSchema();
     setBlocks([]); setNewNames([]); setCodeText(''); setRestate(''); setFormula('');
-    setResultEntries([]); setLogEntries([]); setActiveId(null);
+    
+    // === INITIALIZE WITH WELCOME MESSAGE ===
+    setResultEntries([initialWelcome]); 
+    setLogEntries([initialWelcome]); 
+    // =======================================
+    
+    setActiveId(null);
   }
   function importProjectClick(){ projRef.current.click(); }
   async function onImportProject(e) {
@@ -1016,7 +1011,6 @@ function App() {
     h('input', { ref:projRef, type:'file', accept:'.json', style:{display:'none'}, onChange:onImportProject }),
 
     h('div', { className:'hsplit workspace' },
-      // LEFT: datasets (single integrated panel)
       h('div', { className:'vsplit', style:{flex:'0 0 230px'} },
         h('div', { className:'window', style:{flex:'1 1 auto'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Datasets', h('span',{className:'grow'})),
@@ -1029,7 +1023,6 @@ function App() {
 
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h') }),
 
-      // CENTER: result (top, large) + prompt/code (bottom)
       h('div', { className:'vsplit', style:{flex:'1 1 auto'} },
         h('div', { className:'window', style:{flex:'1 1 auto'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Results',
@@ -1059,7 +1052,6 @@ function App() {
     ,
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
 
-      // RIGHT: blocks (top) + log (bottom)
       h('div', { className:'vsplit', style:{flex:'0 0 360px'} },
         h('div', { className:'window', style:{flex:'1 1 50%'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
@@ -1080,7 +1072,6 @@ function App() {
           h('div', { className:'content' },
             h(StreamPane, { entries:logEntries, kind:'log' })))) ),
 
-    // Modal
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'') },
         h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
@@ -1099,7 +1090,6 @@ function App() {
         h('div', { className:'pbar' }, h('i', { style:{width:Math.max(8, Math.min(100, progress.pct || 25)) + '%'} })),
         h('div', { className:'pnote' }, progress.note || '작업을 처리하는 중입니다.'))),
 
-    // Context menu
     ctx && h('div', { className:'ctx', style:{left:ctx.x, top:ctx.y}, onClick:e=>e.stopPropagation() },
       ctx.kind==='dataset'
         ? [ h('div',{key:1,className:'item', onClick:()=>{ showPreview(ctx.name); setCtx(null); }},'Preview'),
@@ -1125,7 +1115,6 @@ function MenuComp({ label, items, openId, setOpenId, id }) {
         : h('div',{key:i,className:'ditem', onClick:()=>{ setOpenId(null); it.onClick(); }}, it.label))));
 }
 
-// blocks flow with row labels + smooth drag-to-newline
 function renderBlocksFlow(blocks, activeId, selectedIds, fns) {
   const out = [];
   blocks.forEach((b, i) => {
