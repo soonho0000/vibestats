@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vibestats — WebR Statistical Analysis</title>
 <style>
-  /* 기본 다크 테마 변수 */
   :root {
     --bg: #0f1419; --panel: #1a212b; --panel-2: #232c38;
     --line: #2d3744; --line-bright: #3a4757;
@@ -15,32 +14,9 @@
     --mono: 'SF Mono','JetBrains Mono','Menlo','Consolas',monospace;
     --sans: 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   }
-
-  /* 세련된 라이트 테마 변수 */
-  body.light {
-    --bg: #f3f4f6; --panel: #ffffff; --panel-2: #f9fafb;
-    --line: #e5e7eb; --line-bright: #d1d5db;
-    --ink: #111827; --ink-dim: #4b5563; --ink-faint: #9ca3af;
-    --accent: #4f46e5; --accent-dim: #e0e7ff;
-    --blue: #2563eb; --amber: #d97706; --red: #dc2626; --green: #059669;
-  }
-
-  /* 부드러운 테마 전환 애니메이션 */
-  body, .window, .menubar, .ds-item, .nl-input, textarea, .interp-box, .modal {
-    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
-  }
-
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root { height: 100%; }
   body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13px; overflow: hidden; }
-
-  /* 글자 확대 모드 (Large Text Mode) */
-  body.large-text { font-size: 15px; }
-  body.large-text .menubar, body.large-text .load-btn, body.large-text .nl-go { font-size: 14px; }
-  body.large-text .ds-item { font-size: 13px; }
-  body.large-text .nl-input { font-size: 15px; }
-  body.large-text textarea, body.large-text .stream, body.large-text .interp-box, body.large-text .code-btns button { font-size: 14px; }
-  body.large-text .window > .titlebar { font-size: 11px; }
 
   #boot { position: fixed; inset: 0; z-index: 200; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; transition: opacity .5s; }
   #boot .mark { font-family: var(--mono); font-size: 26px; letter-spacing: 2px; }
@@ -50,12 +26,11 @@
   @keyframes slide { 0%{left:-40%} 100%{left:100%} }
   #boot .status { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); height: 14px; }
 
-  .menubar { height: 30px; display: flex; align-items: stretch; background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 12px; position: relative; z-index: 60; }
+  .menubar { height: 30px; display: flex; align-items: stretch; background: #141a22; border-bottom: 1px solid var(--line); font-size: 12px; position: relative; z-index: 60; }
   .menu { position: relative; }
   .menu > .mtitle { padding: 0 14px; height: 100%; display: flex; align-items: center; cursor: pointer; color: var(--ink-dim); font-family: var(--mono); }
-  .menu > .mtitle:hover, .menu.open > .mtitle { background: var(--panel); color: var(--ink); }
+  .menu > .mtitle:hover, .menu.open > .mtitle { background: var(--panel-2); color: var(--ink); }
   .menu .dropdown { position: absolute; top: 100%; left: 0; min-width: 230px; background: var(--panel); border: 1px solid var(--line-bright); border-radius: 0 0 6px 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
-  body.light .menu .dropdown { box-shadow: 0 8px 24px rgba(0,0,0,.08); }
   .menu .ditem { padding: 8px 12px; border-radius: 4px; cursor: pointer; color: var(--ink); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
   .menu .ditem:hover { background: var(--panel-2); color: var(--accent); }
   .menu .dsep { height: 1px; background: var(--line); margin: 4px 6px; }
@@ -63,14 +38,14 @@
   .menubar .right { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
   .menubar .right .logo { font-family: var(--mono); font-weight: 600; letter-spacing: 1px; }
   .menubar .right .logo b { color: var(--accent); } .menubar .right .logo .r { color: var(--blue); }
-  .menubar .right button { display: flex; align-items: center; justify-content: center; font-family: var(--mono); background: transparent; color: var(--ink-dim); border: 1px solid var(--line-bright); border-radius: 4px; padding: 4px 8px; cursor: pointer; transition: all 0.2s; }
-  .menubar .right button:hover { color: var(--ink); border-color: var(--accent); background: var(--panel); }
+  .menubar .right button { font-family: var(--mono); font-size: 11px; background: transparent; color: var(--ink-dim); border: 1px solid var(--line-bright); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+  .menubar .right button:hover { color: var(--ink); border-color: var(--accent); }
 
   .hsplit, .vsplit { display: flex; width: 100%; height: 100%; min-height: 0; min-width: 0; }
   .vsplit { flex-direction: column; }
   .workspace { height: calc(100vh - 30px); }
 
-  .window { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; margin: 5px; min-height: 0; min-width: 0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+  .window { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; margin: 5px; min-height: 0; min-width: 0; overflow: hidden; }
   .window > .titlebar { height: 26px; flex: 0 0 26px; display: flex; align-items: center; gap: 7px; padding: 0 8px 0 11px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.3px; color: var(--ink-dim); user-select: none; }
   .window > .titlebar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
   .window > .titlebar .grow { flex: 1; }
@@ -87,46 +62,37 @@
   .gutter.row::after { height: 2px; left: 14px; right: 14px; top: 2.5px; }
   .gutter:hover::after, .gutter.drag::after { background: var(--accent); }
 
-  .load-btn { margin: 9px 11px; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--mono); font-size: 12px; background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent); border-radius: 5px; padding: 8px; cursor: pointer; transition: all 0.2s; }
-  body.light .load-btn { color: var(--accent); font-weight: 600; }
-  .load-btn:hover { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2); }
-  
+  .load-btn { margin: 9px 11px; font-family: var(--mono); font-size: 12px; background: var(--accent-dim); color: var(--ink); border: 1px solid var(--accent); border-radius: 5px; padding: 8px; cursor: pointer; text-align: center; }
+  .load-btn:hover { background: var(--accent); color: var(--bg); font-weight: 600; }
   .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; align-content: start; }
-  .ds-item { display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 11px; padding: 8px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 5px; cursor: pointer; transition: all 0.15s; }
-  .ds-item:hover { border-color: var(--line-bright); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-  body.light .ds-item:hover { background: #e2e8f0; }
+  .ds-item { font-family: var(--mono); font-size: 11px; padding: 6px 7px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 4px; cursor: pointer; }
+  .ds-item:hover { border-color: var(--line-bright); background: #28323f; }
   .ds-item.new { border-left-color: var(--accent); }
-  .ds-item .top-row { display: flex; align-items: center; gap: 6px; }
   .ds-item .nm { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ds-item .dim { color: var(--ink-faint); font-size: 10px; padding-left: 20px; }
+  .ds-item .dim { color: var(--ink-faint); font-size: 10px; margin-top: 2px; }
   .ds-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 11px; padding: 8px; grid-column: 1 / -1; }
 
   .nl-box { padding: 11px; display: flex; flex-direction: column; gap: 9px; }
   .nl-row { display: flex; gap: 8px; align-items: stretch; }
-  .nl-input { flex: 1; font-family: var(--mono); font-size: 13px; background: var(--bg); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 9px 11px; outline: none; transition: border-color 0.2s; }
-  .nl-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  .nl-input { flex: 1; font-family: var(--mono); font-size: 13px; background: var(--bg); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 9px 11px; outline: none; }
+  .nl-input:focus { border-color: var(--accent); }
   .nl-input::placeholder { color: var(--ink-faint); }
-  .nl-go { display: flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 0 16px; cursor: pointer; flex: 0 0 120px; transition: all 0.2s; }
-  .nl-go:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .nl-go { font-family: var(--mono); font-size: 12px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 5px; padding: 0 16px; cursor: pointer; flex: 0 0 112px; }
+  .nl-go:hover { border-color: var(--accent); color: var(--accent); }
   .nl-go:disabled { opacity: .5; cursor: default; }
   .interp-box { background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 5px; padding: 9px 11px; font-size: 12px; color: var(--ink-dim); line-height: 1.5; }
   .interp-box .restate { color: var(--ink); }
   .interp-box .formula { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--line); font-family: var(--mono); font-size: 13px; color: var(--amber); white-space: pre-wrap; }
-  
   .code-wrap { display: flex; gap: 8px; align-items: stretch; }
   .code-wrap textarea { flex: 1; min-height: 84px; height: 84px; resize: vertical; font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--bg); border: 1px solid var(--line-bright); border-radius: 5px; padding: 9px 11px; outline: none; line-height: 1.5; white-space: pre; overflow-x: auto; }
-  .code-wrap textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
-  
-  .code-btns { display: flex; flex: 0 0 120px; flex-direction: column; gap: 6px; justify-content: stretch; align-self: stretch; }
-  .code-btns button { display: flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; border-radius: 4px; padding: 8px 12px; cursor: pointer; border: 1px solid var(--line-bright); white-space: nowrap; flex: 1; transition: all 0.2s; }
+  .code-wrap textarea:focus { border-color: var(--accent); }
+  .code-btns { display: flex; flex: 0 0 112px; flex-direction: column; gap: 6px; justify-content: stretch; align-self: stretch; }
+  .code-btns button { font-family: var(--mono); font-size: 11px; border-radius: 4px; padding: 8px 12px; cursor: pointer; border: 1px solid var(--line-bright); white-space: nowrap; flex: 1; }
   .code-btns .run { background: var(--panel-2); color: var(--ink); }
   .code-btns .run:hover { border-color: var(--accent); color: var(--accent); }
-  body.light .code-btns .run:hover { background: #e2e8f0; }
-  .code-btns .runblock { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-  body.light .code-btns .runblock { color: var(--accent); }
-  .code-btns .runblock:hover { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2); }
+  .code-btns .runblock { background: var(--accent-dim); color: var(--ink); border-color: var(--accent); font-weight: 600; }
+  .code-btns .runblock:hover { background: var(--accent); color: var(--bg); }
   .code-btns button:disabled { opacity:.5; cursor:default; }
-  
   .parse-err { color: var(--red); font-family: var(--mono); font-size: 11px; }
 
   /* Blocks: 1.5cm squares flowing left→right */
@@ -136,12 +102,11 @@
   .rowlabel-inline { flex: 0 0 84px; display: flex; align-items: center; }
   .rowlabel-inline input { width: 100%; font-family: var(--mono); font-size: 10px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; outline: none; }
   .rowlabel-inline input:focus { border-color: var(--accent); }
-  .blk { width: 1.5cm; height: 1.5cm; background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 6px; padding: 4px 5px; cursor: grab; display: flex; flex-direction: column; position: relative; user-select: none; transition: box-shadow .12s, transform .04s, border-color .15s; }
-  .blk:hover { border-color: var(--line-bright); }
+  .blk { width: 1.5cm; height: 1.5cm; background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 6px; padding: 4px 5px; cursor: grab; display: flex; flex-direction: column; position: relative; user-select: none; transition: box-shadow .12s, transform .04s; }
   .blk.err { border-top-color: var(--red); }
   .blk.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .blk.selected { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(217,164,91,.55); }
-  .blk.dragging { box-shadow: 0 10px 26px rgba(0,0,0,.25); z-index: 40; cursor: grabbing; }
+  .blk.dragging { box-shadow: 0 10px 26px rgba(0,0,0,.55); z-index: 40; cursor: grabbing; }
   .blk .top { display: flex; align-items: center; }
   .blk .idx { font-family: var(--mono); font-size: 9px; color: var(--blue); font-weight: 700; }
   .blk.err .idx { color: var(--red); }
@@ -149,8 +114,8 @@
   .blk .st.ok { color: var(--green); } .blk .st.err { color: var(--red); } .blk .st.run { color: var(--amber); }
   .blk .mini { font-family: var(--mono); font-size: 7px; color: var(--ink-faint); line-height: 1.15; margin-top: 1px; flex: 1; overflow: hidden; }
   .blk .btns { display: flex; gap: 2px; }
-  .blk .bbtn { flex: 1; font-family: var(--mono); font-size: 9px; background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line); border-radius: 3px; padding: 1px 0; cursor: pointer; text-align: center; transition: all 0.1s; }
-  .blk .bbtn:hover { color: var(--ink); border-color: var(--accent); background: var(--panel-2); }
+  .blk .bbtn { flex: 1; font-family: var(--mono); font-size: 9px; background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line); border-radius: 3px; padding: 1px 0; cursor: pointer; text-align: center; }
+  .blk .bbtn:hover { color: var(--ink); border-color: var(--accent); }
   .blocks-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 12px; padding: 30px 12px; text-align: center; line-height: 1.8; width: 100%; }
   .select-box { position: fixed; z-index: 75; border: 1px dashed var(--accent); background: rgba(111,140,255,.16); pointer-events: none; }
 
@@ -161,16 +126,15 @@
   .entry:last-child { border-bottom: none; }
   .entry .ehead { font-size: 10px; color: var(--ink-faint); margin-bottom: 3px; }
   .entry.err .ehead { color: var(--red); }
-  .entry img { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; margin: 4px 0; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  .entry img { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; margin: 4px 0; background: #fff; }
   .entry .interp { color: var(--green); border-left: 2px solid var(--green); padding-left: 8px; margin-top: 5px; white-space: pre-wrap; }
   table.df { border-collapse: collapse; }
   table.df th, table.df td { border: 1px solid var(--line); padding: 3px 6px; text-align: right; white-space: nowrap; }
   table.df th { background: var(--panel-2); color: var(--ink-dim); position: sticky; top: 0; }
   table.df td { color: var(--ink); }
 
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 80; display: block; backdrop-filter: blur(2px); }
-  .modal { background: var(--panel); border: 1px solid var(--line-bright); border-radius: 10px; width: min(900px,88vw); height: min(640px,78vh); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); resize: both; min-width: 420px; min-height: 260px; box-shadow: 0 24px 48px rgba(0,0,0,0.2); }
-  body.light .modal { box-shadow: 0 24px 48px rgba(0,0,0,0.1); }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 80; display: block; }
+  .modal { background: var(--panel); border: 1px solid var(--line-bright); border-radius: 8px; width: min(900px,88vw); height: min(640px,78vh); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); resize: both; min-width: 420px; min-height: 260px; }
   .modal.full { left: 4vw !important; top: 5vh !important; transform: none !important; width: 92vw !important; height: 88vh !important; max-height: 88vh; resize: none; }
   .modal h3 { font-family: var(--mono); font-size: 13px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); color: var(--accent); display: flex; gap: 6px; align-items: center; cursor: move; user-select: none; }
   .modal h3 .mtitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -182,7 +146,6 @@
   .modal .mfoot button { font-family: var(--mono); font-size: 12px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 4px; padding: 6px 16px; cursor: pointer; }
 
   .ctx { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--line-bright); border-radius: 6px; padding: 4px; min-width: 130px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
-  body.light .ctx { box-shadow: 0 6px 20px rgba(0,0,0,.08); }
   .ctx .item { font-family: var(--mono); font-size: 12px; padding: 7px 11px; border-radius: 4px; cursor: pointer; color: var(--ink); }
   .ctx .item:hover { background: var(--panel-2); }
   .ctx .item.danger:hover { background: #3a2424; color: var(--red); }
@@ -190,9 +153,8 @@
 
   .entry-actions { display: flex; gap: 6px; margin-top: 5px; }
   .entry-actions button { flex: 0 0 auto; min-width: 90px; padding: 3px 10px !important; font-size: 11px !important; }
-  .progress-bg { position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,.42); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+  .progress-bg { position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,.42); display: flex; align-items: center; justify-content: center; }
   .progress-card { width: min(440px, 82vw); background: var(--panel); border: 1px solid var(--line-bright); border-radius: 10px; padding: 18px; box-shadow: 0 18px 44px rgba(0,0,0,.55); font-family: var(--mono); }
-  body.light .progress-card { box-shadow: 0 18px 44px rgba(0,0,0,.15); }
   .progress-card .ptitle { color: var(--accent); font-size: 13px; margin-bottom: 9px; }
   .progress-card .pmsg { color: var(--ink-dim); font-size: 11px; margin-bottom: 12px; line-height: 1.5; }
   .progress-card .pbar { height: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
@@ -230,22 +192,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 const h = React.createElement;
 
-// ===== 세련된 SVG 아이콘들 =====
-const iconSun = 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z';
-const iconMoon = 'M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z';
-const iconText = 'M4 7V4h16v3M9 20h6M12 4v16';
-const iconImport = 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12';
-const iconSparkle = 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z';
-const iconPlay = 'M5 3l14 9-14 9V3z'; // 채워진 아이콘
-const iconBlock = 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z';
-const iconTable = 'M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z';
-
-const Icon = ({ path, size=16, fill="none", stroke="currentColor", strokeWidth=2 }) =>
-  h('svg', {width:size, height:size, viewBox:'0 0 24 24', fill, stroke, strokeWidth, strokeLinecap:'round', strokeLinejoin:'round', style:{display:'inline-block', flexShrink:0}},
-    h('path', {d:path})
-  );
-
-
 let webR = null;
 const bootStatus = (t) => { const e = document.getElementById('bootStatus'); if (e) e.textContent = t; };
 
@@ -276,7 +222,7 @@ async function getSchema() {
 }
 
 // ===== LLM via secure backend proxy =====
-const OPENAI_MODEL = 'gpt-4o-mini';
+const OPENAI_MODEL = 'gpt-5.4-mini';
 const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
 
 const SYSTEM_PROMPT = `You convert a user's natural-language data-analysis request into runnable R code.
@@ -647,15 +593,7 @@ function App() {
   const [parseErr, setParseErr] = useState('');
   const [busy, setBusy] = useState(false);
   
-  // 테마 & 폰트 크기 상태 (새로 추가)
-  const [theme, setTheme] = useState('dark');
-  const [isLargeText, setIsLargeText] = useState(false);
-
-  // body 태그에 클래스 적용
-  useEffect(() => {
-    document.body.className = `${theme === 'light' ? 'light' : ''} ${isLargeText ? 'large-text' : ''}`.trim();
-  }, [theme, isLargeText]);
-
+  // === THIS IS THE MODIFIED SECTION FOR THE WELCOME MESSAGE ===
   const initialWelcome = {
     id: 0,
     head: '[Guide] Welcome to Vibestats!',
@@ -663,6 +601,7 @@ function App() {
   };
   const [resultEntries, setResultEntries] = useState([initialWelcome]);
   const [logEntries, setLogEntries] = useState([initialWelcome]);
+  // ============================================================
 
   const [modal, setModal] = useState(null);
   const [ctx, setCtx] = useState(null);
@@ -944,8 +883,11 @@ function App() {
     await refreshSchema();
     setBlocks([]); setNewNames([]); setCodeText(''); setRestate(''); setFormula('');
     
+    // === INITIALIZE WITH WELCOME MESSAGE ===
     setResultEntries([initialWelcome]); 
     setLogEntries([initialWelcome]); 
+    // =======================================
+    
     setActiveId(null);
   }
   function importProjectClick(){ projRef.current.click(); }
@@ -1063,14 +1005,6 @@ function App() {
       ]}),
       h('div', { className:'spacer' }),
       h('div', { className:'right' },
-        // 테마 토글 버튼
-        h('button', { onClick: () => setTheme(t => t==='dark' ? 'light' : 'dark'), title:'Toggle Theme' },
-          h(Icon, { path: theme === 'dark' ? iconSun : iconMoon, size: 14 })
-        ),
-        // 글꼴 크기 토글 버튼
-        h('button', { onClick: () => setIsLargeText(l => !l), title:'Toggle Text Size' },
-          h(Icon, { path: iconText, size: 14 })
-        ),
         h('span', { className:'logo' }, 'Vibe', h('b',null,'stats'), ' · ', h('span',{className:'r'},'WebR')))),
 
     h('input', { ref:fileRef, type:'file', accept:'.csv,.tsv,.dta,.sav,.por,.sas7bdat,.xpt,.xls,.xlsx,.rds,.rdata,.rda', style:{display:'none'}, onChange:onFile }),
@@ -1081,10 +1015,8 @@ function App() {
         h('div', { className:'window', style:{flex:'1 1 auto'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Datasets', h('span',{className:'grow'})),
           h('div', { className:'content' },
-            h('button', { className:'load-btn', onClick:()=>fileRef.current.click() }, 
-              h(Icon, { path: iconImport, size: 14 }), 'Import Data'
-            ),
-            h('div', { style:{fontSize:'9px',color:'var(--ink-faint)',fontFamily:'var(--mono)',padding:'0 11px 4px',marginTop:'-4px', textAlign:'center'} }, 'CSV · Stata · SAS · SPSS · Excel · R'),
+            h('button', { className:'load-btn', onClick:()=>fileRef.current.click() }, '＋ Import Data'),
+            h('div', { style:{fontSize:'9px',color:'var(--ink-faint)',fontFamily:'var(--mono)',padding:'0 11px 4px',marginTop:'-4px'} }, 'CSV · Stata · SAS · SPSS · Excel · R'),
             h('div', { className:'ds-list', onMouseDown:beginDatasetAreaSelect, onContextMenu:e=>{ if(selectedDatasets.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'datasets-selected'}); } } },
               dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],newNames.includes(n),selectedDatasets.includes(n),showPreview,setCtx,setSelectedDatasets))
                 : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete')))))),
@@ -1107,21 +1039,15 @@ function App() {
               h('div', { className:'nl-row' },
                 h('input', { className:'nl-input', ref:promptRef, placeholder:'Enter prompt',
                   onKeyDown:e=>{ if(e.key==='Enter') onInterpretPrompt(); } }),
-                h('button', { className:'nl-go', onClick:onInterpretPrompt, disabled:busy }, 
-                  h(Icon, { path: iconSparkle, size: 14 }), busy ? '...' : 'Generate'
-                )),
+                h('button', { className:'nl-go', onClick:onInterpretPrompt, disabled:busy }, busy?'…':'Generate')),
               (restate || formula) && h('div', { className:'interp-box' },
                 restate && h('div',{className:'restate'}, restate),
                 formula && h('div',{className:'formula'}, formula)),
               h('div', { className:'code-wrap' },
                 h('textarea', { value:codeText, placeholder:'Enter code', spellCheck:false, onChange:e=>setCodeText(e.target.value) }),
                 h('div', { className:'code-btns' },
-                  h('button', { className:'run', onClick:onRunOnly, disabled:busy }, 
-                    h(Icon, { path: iconPlay, size: 14, fill: "currentColor", stroke: "none" }), 'Run'
-                  ),
-                  h('button', { className:'runblock', onClick:onRunBlock, disabled:busy }, 
-                    h(Icon, { path: iconBlock, size: 14 }), 'Run + Block'
-                  ))),
+                  h('button', { className:'run', onClick:onRunOnly, disabled:busy }, 'Run'),
+                  h('button', { className:'runblock', onClick:onRunBlock, disabled:busy }, 'Run + Block'))),
               parseErr && h('div', { className:'parse-err' }, parseErr)))))
     ,
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
@@ -1129,7 +1055,7 @@ function App() {
       h('div', { className:'vsplit', style:{flex:'0 0 360px'} },
         h('div', { className:'window', style:{flex:'1 1 50%'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
-            h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — drag down for new row'),
+            h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — fixed order · drag down for new row'),
             h('span',{className:'grow'}),
             h('button',{className:'tbtn', title:'Export R code', onClick:exportRCode},'rcode'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Blocks','blocks')},'⛶')),
@@ -1236,7 +1162,6 @@ function blockSquare(b, activeId, selectedIds, fns) {
       h('div',{className:'bbtn',title:'rerun',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.rerun(b.id)},'↻'),
       h('div',{className:'bbtn',title:'info',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.showBlockInfo(b.id)},'ⓘ')));
 }
-
 function dsItem(n, info, isNew, selected, showPreview, setCtx, setSelectedDatasets) {
   return h('div', { key:n, 'data-name':n, className:'ds-item'+(isNew?' new':'')+(selected?' selected':''),
     onClick:e=>{
@@ -1244,14 +1169,7 @@ function dsItem(n, info, isNew, selected, showPreview, setCtx, setSelectedDatase
       setSelectedDatasets([]); showPreview(n);
     },
     onContextMenu:e=>{ e.preventDefault(); if (selected) setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { setSelectedDatasets([]); setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
-    
-    // 데이터셋 이름과 표(Table) 아이콘 함께 배치
-    h('div', { className:'top-row' },
-      h(Icon, { path: iconTable, size: 14, stroke: 'var(--blue)' }),
-      h('span', { className:'nm' }, n)
-    ),
-    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}${isNew?' · new':''}`)
-  );
+    h('div',{className:'nm'}, n), h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}${isNew?' · new':''}`));
 }
 
 (async () => {
