@@ -289,6 +289,7 @@
   .result-html {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: 12px;
     margin-top: 6px;
   }
@@ -299,6 +300,7 @@
     border-radius: 10px;
     padding: 12px 14px;
     box-shadow: var(--result-card-shadow);
+    max-width: 100%;
   }
   .notice-card { border-left-color: var(--amber); color: var(--ink); }
   .error-card { border-left-color: var(--red); color: var(--ink); }
@@ -312,12 +314,15 @@
   }
   .result-table-wrap {
     overflow: auto;
+    display: inline-block;
+    max-width: 100%;
     border: 1px solid var(--line);
     border-radius: 8px;
     background: color-mix(in srgb, var(--panel) 84%, var(--bg));
   }
   table.result-table {
-    width: 100%;
+    width: auto;
+    min-width: max-content;
     border-collapse: separate;
     border-spacing: 0;
     font-family: var(--mono);
@@ -375,6 +380,24 @@
   .editor-help { color:var(--ink-dim); font-family:var(--sans); font-size:calc(12px * var(--font-scale)); line-height:1.45; }
   .modal-edit-btn { cursor:pointer; color:var(--accent); border:1px solid var(--accent); border-radius:3px; padding:0 8px; background:var(--accent-dim); font-family:var(--mono); font-size:11px; }
   .modal-edit-btn:hover { background:var(--accent); color:var(--bg); }
+
+
+  .sheet-editor { display:flex; flex-direction:column; gap:10px; height:100%; min-height:0; }
+  .sheet-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .sheet-toolbar input { background:var(--bg); color:var(--ink); border:1px solid var(--line-bright); border-radius:7px; padding:6px 9px; font-family:var(--mono); }
+  .sheet-wrap { flex:1; min-height:0; overflow:auto; border:1px solid var(--line); border-radius:8px; background: color-mix(in srgb, var(--panel) 86%, var(--bg)); }
+  table.sheet-table { border-collapse:separate; border-spacing:0; width:auto; min-width:max-content; font-family:var(--mono); font-size:calc(12px * var(--font-scale)); }
+  table.sheet-table th, table.sheet-table td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:0; }
+  table.sheet-table th { position:sticky; top:0; z-index:2; background:var(--panel-2); color:var(--ink-dim); font-weight:800; padding:6px 8px; text-align:center; }
+  table.sheet-table th.row-head { left:0; z-index:3; min-width:42px; }
+  table.sheet-table td.row-num { position:sticky; left:0; z-index:1; background:var(--panel-2); color:var(--ink-dim); text-align:right; padding:6px 8px; min-width:42px; }
+  table.sheet-table input { width:120px; min-width:120px; border:0; outline:none; background:transparent; color:var(--ink); padding:6px 8px; font-family:var(--mono); font-size:inherit; }
+  table.sheet-table input:focus { background:var(--accent-dim); box-shadow: inset 0 0 0 1px var(--accent); }
+  .block-editor { display:flex; flex-direction:column; gap:10px; height:100%; }
+  .block-editor label { color:var(--ink-dim); font-family:var(--mono); font-weight:800; }
+  .block-editor textarea, .block-editor input { width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line-bright); border-radius:8px; padding:9px 11px; font-family:var(--mono); outline:none; }
+  .block-editor textarea { min-height:80px; resize:vertical; white-space:pre; }
+  .block-editor .code-edit { flex:1; min-height:180px; }
 
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
@@ -848,6 +871,57 @@ async function createBlankDataset(name, rows=10, cols=5) {
   await getSchema();
 }
 
+function parseTSVToGrid(tsv, minRows=12, minCols=5) {
+  const lines = String(tsv || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  if (lines.length && lines[lines.length-1] === '') lines.pop();
+  let grid = lines.length ? lines.map(line => line.split('\t')) : [];
+  const cols = Math.max(minCols, ...grid.map(r => r.length), 1);
+  const rows = Math.max(minRows, grid.length || 0);
+  while (grid.length < rows) grid.push([]);
+  grid = grid.map(r => { const rr = r.slice(); while (rr.length < cols) rr.push(''); return rr; });
+  return grid;
+}
+function makeBlankGrid(rows=12, cols=5) {
+  const r = Math.max(2, parseInt(rows || 12, 10));
+  const c = Math.max(1, parseInt(cols || 5, 10));
+  const grid = [];
+  grid.push(Array.from({length:c}, (_,i)=>'V'+(i+1)));
+  for (let i=1;i<r;i++) grid.push(Array.from({length:c}, ()=>''));
+  return grid;
+}
+function gridToTSV(grid) {
+  const g = (grid || []).map(r => (r || []).map(v => String(v ?? '')));
+  return g.map(r => r.join('\t')).join('\n');
+}
+function updateGridCell(grid, row, col, value) {
+  const next = (grid || [[]]).map(r => (r || []).slice());
+  while (next.length <= row) next.push([]);
+  const cols = Math.max(...next.map(r => r.length), col+1, 1);
+  for (const r of next) while (r.length < cols) r.push('');
+  next[row][col] = value;
+  return next;
+}
+function pasteIntoGrid(grid, row, col, text) {
+  const block = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').map(line => line.split('\t'));
+  if (block.length && block[block.length-1].length === 1 && block[block.length-1][0] === '') block.pop();
+  let next = (grid || [[]]).map(r => (r || []).slice());
+  const needRows = row + block.length;
+  const needCols = Math.max(...block.map(r => col + r.length), ...next.map(r => r.length), 1);
+  while (next.length < needRows) next.push([]);
+  for (const r of next) while (r.length < needCols) r.push('');
+  block.forEach((r, i) => r.forEach((v, j) => { next[row+i][col+j] = v; }));
+  return next;
+}
+function addGridRow(grid) {
+  const cols = Math.max(...(grid || [[]]).map(r => r.length), 1);
+  return [...(grid || []).map(r=>r.slice()), Array.from({length:cols}, ()=>'')];
+}
+function addGridCol(grid) {
+  const g = (grid && grid.length ? grid : makeBlankGrid(2,1)).map(r => r.slice());
+  const idx = Math.max(...g.map(r=>r.length), 0) + 1;
+  return g.map((r, i) => [...r, i===0 ? 'V'+idx : '']);
+}
+
 
 function analyzeError(msg) {
   const m = msg.replace(/^R execution error:\s*/, '').trim();
@@ -1044,37 +1118,38 @@ function App() {
   async function openDatasetEditor(name) {
     try {
       const tsv = await datasetToTSV(name, 1000);
-      setModal({ datasetEdit:name, title:`Modify dataset — ${name}`, tsv, full:false });
+      setModal({ datasetEdit:name, title:`Modify dataset — ${name}`, sheetGrid:parseTSVToGrid(tsv, 12, 5), full:false });
     } catch(err) {
       pushLog({ head:`[${now()}] edit failed`, error:true, text:err.message||String(err) });
     }
   }
-  async function saveDatasetEditor(name, tsv) {
+  async function saveDatasetEditor(name, grid) {
     try {
-      await saveTSVToDataset(name, tsv);
+      await saveTSVToDataset(name, gridToTSV(grid));
       await refreshSchema();
-      pushLog({ head:`[${now()}] dataset modified`, text:`Dataset '${name}' was updated from the editor.` });
+      pushLog({ head:`[${now()}] dataset modified`, text:`Dataset '${name}' was updated from the sheet editor.` });
       setModal(null);
     } catch(err) {
       pushLog({ head:`[${now()}] dataset modify failed`, error:true, text:err.message||String(err) });
     }
   }
-  async function newBlankDataset() {
-    let nm = prompt('New dataset name:', 'new_dataset');
-    if (nm === null) return;
-    nm = nm.trim().replace(/\W+/g,'_').replace(/^_+|_+$/g,'');
+  function newBlankDataset() {
+    let nm = 'new_dataset', i = 1;
+    while ((window._dsCache||{})[nm]) { i++; nm = 'new_dataset' + i; }
+    setModal({ newDataset:true, title:'New dataset', sheetName:nm, sheetGrid:makeBlankGrid(12,5), full:false });
+  }
+  async function saveNewDatasetFromSheet(name, grid) {
+    let nm = String(name || '').trim().replace(/\W+/g,'_').replace(/^_+|_+$/g,'');
     if (!nm) { alert('Dataset name cannot be empty.'); return; }
     if (/^\d/.test(nm)) nm = 'd_' + nm;
     if ((window._dsCache||{})[nm]) { alert('A dataset with that name already exists.'); return; }
-    const rows = prompt('Number of blank rows:', '10'); if (rows === null) return;
-    const cols = prompt('Number of columns:', '5'); if (cols === null) return;
     try {
-      await createBlankDataset(nm, rows, cols);
+      await saveTSVToDataset(nm, gridToTSV(grid));
       await refreshSchema();
       setNewNames(p=>p.includes(nm)?p:[...p,nm]);
       markDatasetKind(nm, 'created');
-      pushLog({ head:`[${now()}] new dataset`, text:`Blank dataset '${nm}' was created. You can paste Excel cells into the editor.` });
-      await openDatasetEditor(nm);
+      pushLog({ head:`[${now()}] new dataset`, text:`New dataset '${nm}' was created from the sheet editor.` });
+      setModal(null);
     } catch(err) {
       pushLog({ head:`[${now()}] new dataset failed`, error:true, text:err.message||String(err) });
     }
@@ -1188,7 +1263,7 @@ function App() {
     const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40));
     await refreshSchema();
     const status = rr.res.error ? 'err' : 'ok';
-    const block = { id, index, summary:rr.summary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||'', status, label:'', newline:false };
+    const block = { id, index, summary:rr.summary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||'', status, label:'', newline:false, userMemo:'' };
     setBlocks(bs => [...bs, block]);
     setActiveId(id);
     dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code);
@@ -1288,7 +1363,15 @@ function App() {
     if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
     hideProgress();
   }
-  function showBlockInfo(id){ const b=blocksRef.current.find(x=>x.id===id); if(b) setModal({ title:`#${b.index} block`, body:`${b.label?'Label: '+b.label+'\n\n':''}Prompt:\n${b.summary || '(none)'}\n\nFormula:\n${b.formula || '(none)'}\n\nCode:\n${b.code}` }); }
+  function showBlockInfo(id){ const b=blocksRef.current.find(x=>x.id===id); if(b) setModal({ blockInfo:id, title:`#${b.index} block`, body:`${b.label?'Label: '+b.label+'\n\n':''}${b.userMemo?'User memo:\n'+b.userMemo+'\n\n':''}Prompt:\n${b.summary || '(none)'}\n\nFormula:\n${b.formula || '(none)'}\n\nCode:\n${b.code}` }); }
+  function openBlockEditor(id) {
+    const b = blocksRef.current.find(x=>x.id===id); if (!b) return;
+    setModal({ blockEdit:id, title:`Modify block #${b.index}`, userMemo:b.userMemo || 'user memo: ', summary:b.summary || '', formula:b.formula || '', code:b.code || '' });
+  }
+  function saveBlockEditor(id, data) {
+    setBlocks(bs=>bs.map(b=>b.id===id ? {...b, userMemo:data.userMemo || '', summary:data.summary || '', formula:data.formula || '', code:data.code || ''} : b));
+    setModal(null);
+  }
   function deleteBlock(id){ setBlocks(bs=>bs.filter(x=>x.id!==id).map((b,i)=>({...b,index:i+1}))); setSelectedIds(ids=>ids.filter(x=>x!==id)); }
   function deleteSelectedBlocks(){ setBlocks(bs=>bs.filter(x=>!selectedIds.includes(x.id)).map((b,i)=>({...b,index:i+1}))); setSelectedIds([]); }
   function setLabel(id,v){ setBlocks(bs=>bs.map(b=>b.id===id?{...b,label:v}:b)); }
@@ -1369,7 +1452,7 @@ function App() {
     const names = await allDatasetNames(); const datasets={};
     for (const n of names) datasets[n] = await exportCSV(n);
     const proj = { version:3, app:'Vibestats', savedAt:new Date().toISOString(),
-      blocks: blocks.map(b=>({index:b.index,summary:b.summary,code:b.code,label:b.label,status:b.status,formula:b.formula,newline:b.newline})),
+      blocks: blocks.map(b=>({index:b.index,summary:b.summary,code:b.code,label:b.label,status:b.status,formula:b.formula,newline:b.newline,userMemo:b.userMemo||''})),
       datasets, datasetKinds, datasetNotes };
     await saveTextFile('vibestats_project.json', 'application/json', JSON.stringify(proj,null,2));
   }
@@ -1400,7 +1483,7 @@ function App() {
       }
       await refreshSchema();
       const restored = (proj.blocks||[]).map((b,i)=>({ id:'b'+(++idCounter.current), index:i+1,
-        summary:b.summary, code:b.code, label:b.label||'', status:b.status||'ok', formula:b.formula||'', newline:b.newline||false }));
+        summary:b.summary, code:b.code, label:b.label||'', status:b.status||'ok', formula:b.formula||'', newline:b.newline||false, userMemo:b.userMemo||'' }));
       setBlocks(restored); setNewNames([]);
       setDatasetKinds(proj.datasetKinds || Object.fromEntries(Object.keys(proj.datasets||{}).map(n => [n, 'uploaded'])));
       setDatasetNotes(proj.datasetNotes || {});
@@ -1429,6 +1512,7 @@ function App() {
       lines.push('# Prompt: ' + (b.summary || '(none)').replace(/\n/g, '\n#         '));
       lines.push('# Formula: ' + (b.formula || '(none)').replace(/\n/g, '\n#          '));
       lines.push('# Status: ' + (b.status || '(unknown)'));
+      if (b.userMemo) lines.push('# User memo: ' + String(b.userMemo).split('\n').join('\n#            '));
       lines.push(b.code || '# (no code)');
     });
     await saveTextFile('vibestats_blocks.R', 'text/x-r-source', lines.join('\n') + '\n');
@@ -1570,23 +1654,33 @@ function App() {
                 : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run + Block".'))))) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
-      h('div', { className:'modal'+(modal.full?' full':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : (modal.datasetEdit ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
+      h('div', { className:'modal'+(modal.full?' full':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
+        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), modal.blockInfo && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }},'Modify'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
         modal.noteDataset ? h('div',{className:'mbody'},
             h('div',{className:'note-pane'},
               h('div',{className:'note-title'}, modal.noteDataset),
               h('textarea',{ value:datasetNotes[modal.noteDataset] || '', placeholder:'Write memo for this dataset...', onChange:e=>updateDatasetNote(modal.noteDataset, e.target.value) })))
           : modal.datasetEdit ? h('div',{className:'mbody'},
-            h('div',{className:'dataset-editor'},
-              h('div',{className:'editor-help'}, 'Tab-separated editor. You can paste cells copied from Excel or Google Sheets. The first row is used as column names. Saving replaces the dataset.'),
-              h('textarea',{ value:modal.tsv || '', spellCheck:false, onChange:e=>setModal(m=>({...m, tsv:e.target.value})) }),
+            h(SheetEditor,{ grid:modal.sheetGrid || makeBlankGrid(12,5), setGrid:g=>setModal(m=>({...m, sheetGrid:g})), help:'Edit cells directly. You can paste copied Excel or Google Sheets cells into any cell. The first row is used as column names.', onSave:()=>saveDatasetEditor(modal.datasetEdit, modal.sheetGrid || makeBlankGrid(12,5)), saveLabel:'Save changes' }))
+          : modal.newDataset ? h('div',{className:'mbody'},
+            h(SheetEditor,{ grid:modal.sheetGrid || makeBlankGrid(12,5), setGrid:g=>setModal(m=>({...m, sheetGrid:g})), name:modal.sheetName || 'new_dataset', setName:v=>setModal(m=>({...m, sheetName:v})), help:'Create a dataset by typing into cells or pasting a copied Excel/Google Sheets range. The first row is used as column names.', onSave:()=>saveNewDatasetFromSheet(modal.sheetName, modal.sheetGrid || makeBlankGrid(12,5)), saveLabel:'Create dataset' }))
+          : modal.blockEdit ? h('div',{className:'mbody'},
+            h('div',{className:'block-editor'},
+              h('label',null,'User memo'),
+              h('textarea',{value:modal.userMemo || 'user memo: ', onChange:e=>setModal(m=>({...m,userMemo:e.target.value}))}),
+              h('label',null,'Prompt'),
+              h('textarea',{value:modal.summary || '', onChange:e=>setModal(m=>({...m,summary:e.target.value}))}),
+              h('label',null,'Formula'),
+              h('input',{value:modal.formula || '', onChange:e=>setModal(m=>({...m,formula:e.target.value}))}),
+              h('label',null,'Code'),
+              h('textarea',{className:'code-edit', value:modal.code || '', spellCheck:false, onChange:e=>setModal(m=>({...m,code:e.target.value}))}),
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
-                h('button',{onClick:()=>saveDatasetEditor(modal.datasetEdit, modal.tsv || '')},'Save changes'))))
+                h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
           : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null}))
           : modal.blocksView ? h('div',{className:'mbody',style:{padding:'14px'}}, h('div',{className:'blocks-flow'}, renderBlocksFlow(blocksRef.current, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds})))
           : modal.html ? h('div',{className:'mbody', dangerouslySetInnerHTML:{__html:modal.html}})
           : h('div',{className:'mbody'}, modal.body),
-        !(modal.noteDataset || modal.datasetEdit) && h('div', { className:'mfoot' }, h('button',{onClick:()=>setModal(null)},'Close')))),
+        !(modal.noteDataset || modal.datasetEdit || modal.newDataset || modal.blockEdit) && h('div', { className:'mfoot' }, h('button',{onClick:()=>setModal(null)},'Close')))),
 
     selectionBox && h('div', { className:'select-box', style:{left:selectionBox.x, top:selectionBox.y, width:selectionBox.w, height:selectionBox.h} }),
 
@@ -1615,6 +1709,36 @@ function App() {
           ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }},`Delete ${selectedIds.length} blocks`) ]
           : [ h('div',{key:1,className:'item danger', onClick:()=>{ if (selectedIds.length > 1 && selectedIds.includes(ctx.id)) deleteSelectedBlocks(); else deleteBlock(ctx.id); setCtx(null); }}, selectedIds.length > 1 && selectedIds.includes(ctx.id) ? `Delete ${selectedIds.length} blocks` : 'Delete block') ])
   );
+}
+
+
+function SheetEditor({ grid, setGrid, name, setName, help, onSave, saveLabel }) {
+  const g = grid && grid.length ? grid : makeBlankGrid(12,5);
+  const cols = Math.max(...g.map(r=>r.length), 1);
+  const onCellPaste = (e, r, c) => {
+    const txt = e.clipboardData && e.clipboardData.getData('text');
+    if (txt && (txt.includes('\t') || txt.includes('\n'))) {
+      e.preventDefault();
+      setGrid(pasteIntoGrid(g, r, c, txt));
+    }
+  };
+  return h('div',{className:'sheet-editor'},
+    h('div',{className:'editor-help'}, help || 'Edit cells directly. The first row is used as column names.'),
+    h('div',{className:'sheet-toolbar'},
+      setName && h('input',{value:name || '', placeholder:'dataset_name', onChange:e=>setName(e.target.value)}),
+      h('button',{className:'modal-edit-btn', onClick:()=>setGrid(addGridRow(g))},'+ Row'),
+      h('button',{className:'modal-edit-btn', onClick:()=>setGrid(addGridCol(g))},'+ Column'),
+      h('button',{className:'modal-edit-btn', onClick:onSave}, saveLabel || 'Save')),
+    h('div',{className:'sheet-wrap'},
+      h('table',{className:'sheet-table'},
+        h('thead',null, h('tr',null,
+          h('th',{className:'row-head'},''),
+          Array.from({length:cols}, (_,c)=>h('th',{key:c}, String.fromCharCode(65 + (c % 26)) + (c>=26 ? Math.floor(c/26) : ''))))),
+        h('tbody',null,
+          g.map((row,r)=>h('tr',{key:r},
+            h('td',{className:'row-num'}, r+1),
+            Array.from({length:cols}, (_,c)=>h('td',{key:c},
+              h('input',{value:(row && row[c]) || '', onPaste:e=>onCellPaste(e,r,c), onChange:e=>setGrid(updateGridCell(g,r,c,e.target.value))})))))))))
 }
 
 function MenuComp({ label, items, openId, setOpenId, id }) {
@@ -1686,7 +1810,6 @@ function dsItem(n, info, kind, selected, fns) {
     h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]} · ${kind || 'uploaded'}`),
     h('div',{className:'ds-actions'},
       h('button',{className:'ds-ico', title:'Preview', onMouseDown:stop, onClick:e=>{stop(e); fns.showPreview(n);}}, '👁'),
-      h('button',{className:'ds-ico', title:'Modify', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetEditor(n);}}, '▦'),
       h('button',{className:'ds-ico note-btn', title:'Memo', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetNote(n);}}, (fns.datasetNotes && fns.datasetNotes[n]) ? '📝' : '✎'),
       h('button',{className:'ds-ico', title:'Save CSV', onMouseDown:stop, onClick:e=>{stop(e); fns.onSaveDataset(n);}}, '⇩'),
       h('button',{className:'ds-ico', title:'Delete', onMouseDown:stop, onClick:e=>{stop(e); if(confirm(`Delete '${n}'?`)) fns.onDeleteDataset(n);}}, '×')));
