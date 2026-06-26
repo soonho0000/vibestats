@@ -359,6 +359,23 @@
     font-family: var(--mono);
   }
 
+
+
+  .note-btn { color: var(--amber) !important; }
+  .note-pane { display:flex; flex-direction:column; gap:10px; height:100%; }
+  .note-pane .note-title { color:var(--accent); font-family:var(--mono); font-weight:800; }
+  .note-pane textarea, .dataset-editor textarea {
+    width:100%; flex:1; min-height:260px; resize:none;
+    background:var(--bg); color:var(--ink); border:1px solid var(--line-bright);
+    border-radius:8px; padding:12px; font-family:var(--mono); font-size:calc(12px * var(--font-scale)); line-height:1.55;
+    outline:none; white-space:pre; overflow:auto;
+  }
+  .note-pane textarea:focus, .dataset-editor textarea:focus { border-color:var(--accent); }
+  .dataset-editor { display:flex; flex-direction:column; gap:10px; height:100%; }
+  .editor-help { color:var(--ink-dim); font-family:var(--sans); font-size:calc(12px * var(--font-scale)); line-height:1.45; }
+  .modal-edit-btn { cursor:pointer; color:var(--accent); border:1px solid var(--accent); border-radius:3px; padding:0 8px; background:var(--accent-dim); font-family:var(--mono); font-size:11px; }
+  .modal-edit-btn:hover { background:var(--accent); color:var(--bg); }
+
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -797,6 +814,41 @@ async function exportCSV(name) {
 }
 async function allDatasetNames() { await getSchema(); return Object.keys(window._dsCache||{}); }
 
+async function datasetToTSV(name, maxRows=1000) {
+  const code = `local({
+    d <- get(${JSON.stringify(name)}, envir=.nlstat_env)
+    if (!is.data.frame(d)) d <- as.data.frame(d)
+    if (nrow(d) > ${parseInt(maxRows,10)}) d <- d[seq_len(${parseInt(maxRows,10)}), , drop=FALSE]
+    paste(capture.output(write.table(d, stdout(), sep="\t", row.names=FALSE, quote=FALSE, na="")), collapse="\n")
+  })`;
+  return await webR.evalRString(code);
+}
+async function saveTSVToDataset(name, tsv) {
+  const path = '/tmp/__vibestats_edit.tsv';
+  await webR.FS.writeFile(path, new TextEncoder().encode(tsv || ''));
+  await webR.evalRVoid(`local({
+    p <- ${JSON.stringify(path)}; nm <- ${JSON.stringify(name)}
+    if (!nzchar(paste(readLines(p, warn=FALSE), collapse=""))) {
+      d <- data.frame(V1=character(0), check.names=FALSE)
+    } else {
+      d <- utils::read.delim(p, stringsAsFactors=FALSE, check.names=FALSE, na.strings=c("NA"), fill=TRUE)
+    }
+    assign(nm, d, envir=.nlstat_env)
+  })`);
+  await getSchema();
+}
+async function createBlankDataset(name, rows=10, cols=5) {
+  rows = Math.max(0, parseInt(rows || 10, 10));
+  cols = Math.max(1, parseInt(cols || 5, 10));
+  await webR.evalRVoid(`local({
+    nm <- ${JSON.stringify(name)}; nr <- ${rows}L; nc <- ${cols}L
+    d <- as.data.frame(setNames(replicate(nc, rep("", nr), simplify=FALSE), paste0("V", seq_len(nc))), stringsAsFactors=FALSE)
+    assign(nm, d, envir=.nlstat_env)
+  })`);
+  await getSchema();
+}
+
+
 function analyzeError(msg) {
   const m = msg.replace(/^R execution error:\s*/, '').trim();
   const rules = [
@@ -928,6 +980,7 @@ function App() {
   const [schema, setSchema] = useState({});
   const [newNames, setNewNames] = useState([]);
   const [datasetKinds, setDatasetKinds] = useState({});
+  const [datasetNotes, setDatasetNotes] = useState({});
   const [blocks, setBlocks] = useState([]);
   const [codeText, setCodeText] = useState('');
   const [restate, setRestate] = useState('');
@@ -981,6 +1034,50 @@ function App() {
       for (const n of arr) next[n] = kind;
       return next;
     });
+  }
+  function openDatasetNote(name) {
+    setModal({ noteDataset:name, title:`Memo — ${name}`, full:false });
+  }
+  function updateDatasetNote(name, value) {
+    setDatasetNotes(prev => ({...prev, [name]: value}));
+  }
+  async function openDatasetEditor(name) {
+    try {
+      const tsv = await datasetToTSV(name, 1000);
+      setModal({ datasetEdit:name, title:`Modify dataset — ${name}`, tsv, full:false });
+    } catch(err) {
+      pushLog({ head:`[${now()}] edit failed`, error:true, text:err.message||String(err) });
+    }
+  }
+  async function saveDatasetEditor(name, tsv) {
+    try {
+      await saveTSVToDataset(name, tsv);
+      await refreshSchema();
+      pushLog({ head:`[${now()}] dataset modified`, text:`Dataset '${name}' was updated from the editor.` });
+      setModal(null);
+    } catch(err) {
+      pushLog({ head:`[${now()}] dataset modify failed`, error:true, text:err.message||String(err) });
+    }
+  }
+  async function newBlankDataset() {
+    let nm = prompt('New dataset name:', 'new_dataset');
+    if (nm === null) return;
+    nm = nm.trim().replace(/\W+/g,'_').replace(/^_+|_+$/g,'');
+    if (!nm) { alert('Dataset name cannot be empty.'); return; }
+    if (/^\d/.test(nm)) nm = 'd_' + nm;
+    if ((window._dsCache||{})[nm]) { alert('A dataset with that name already exists.'); return; }
+    const rows = prompt('Number of blank rows:', '10'); if (rows === null) return;
+    const cols = prompt('Number of columns:', '5'); if (cols === null) return;
+    try {
+      await createBlankDataset(nm, rows, cols);
+      await refreshSchema();
+      setNewNames(p=>p.includes(nm)?p:[...p,nm]);
+      markDatasetKind(nm, 'created');
+      pushLog({ head:`[${now()}] new dataset`, text:`Blank dataset '${nm}' was created. You can paste Excel cells into the editor.` });
+      await openDatasetEditor(nm);
+    } catch(err) {
+      pushLog({ head:`[${now()}] new dataset failed`, error:true, text:err.message||String(err) });
+    }
   }
 
   function showProgress(text, pct=12, note='대용량 데이터나 패키지 설치 상황에 따라 시간이 달라질 수 있습니다.') {
@@ -1209,12 +1306,13 @@ function App() {
       if (end - start + 1 > 10000 && !confirm('More than 10,000 rows may be slow. Continue?')) return;
     }
     let html=''; try{ html=await previewHTML(name,start,end);}catch(e){ html = `<div style="color:var(--red)">${String(e.message||e)}</div>`; }
-    setModal({ title:`${name}  (${sh[0]} × ${sh[1]}) rows ${start}-${Math.min(end, sh[0])}`, html });
+    setModal({ title:`${name}  (${sh[0]} × ${sh[1]}) rows ${start}-${Math.min(end, sh[0])}`, html, datasetName:name });
   }
   async function onDeleteDataset(name) {
     await deleteDataset(name); await refreshSchema();
     setNewNames(p=>p.filter(n=>n!==name));
     setDatasetKinds(k=>{ const next={...k}; delete next[name]; return next; });
+    setDatasetNotes(k=>{ const next={...k}; delete next[name]; return next; });
     setSelectedDatasets(ds=>ds.filter(x=>x!==name));
   }
   async function onDeleteSelectedDatasets() {
@@ -1224,6 +1322,7 @@ function App() {
     await refreshSchema();
     setNewNames(p=>p.filter(n=>!selectedDatasets.includes(n)));
     setDatasetKinds(k=>{ const next={...k}; for (const n of selectedDatasets) delete next[n]; return next; });
+    setDatasetNotes(k=>{ const next={...k}; for (const n of selectedDatasets) delete next[n]; return next; });
     pushLog({ head:`[${now()}] datasets deleted`, text:`Deleted: ${selectedDatasets.join(', ')}` });
     setSelectedDatasets([]);
   }
@@ -1238,6 +1337,7 @@ function App() {
       await refreshSchema();
       setNewNames(p=>p.map(x=>x===oldName?nm:x));
       setDatasetKinds(k=>{ const next={...k}; if (next[oldName]) { next[nm]=next[oldName]; delete next[oldName]; } return next; });
+      setDatasetNotes(k=>{ const next={...k}; if (Object.prototype.hasOwnProperty.call(next, oldName)) { next[nm]=next[oldName]; delete next[oldName]; } return next; });
       setSelectedDatasets(p=>p.map(x=>x===oldName?nm:x));
       pushLog({ head:`[${now()}] dataset renamed`, text:`${oldName} → ${nm}` });
     } catch(err) { alert('Rename failed: '+(err.message||err)); }
@@ -1270,7 +1370,7 @@ function App() {
     for (const n of names) datasets[n] = await exportCSV(n);
     const proj = { version:3, app:'Vibestats', savedAt:new Date().toISOString(),
       blocks: blocks.map(b=>({index:b.index,summary:b.summary,code:b.code,label:b.label,status:b.status,formula:b.formula,newline:b.newline})),
-      datasets };
+      datasets, datasetKinds, datasetNotes };
     await saveTextFile('vibestats_project.json', 'application/json', JSON.stringify(proj,null,2));
   }
   async function newProject() {
@@ -1278,7 +1378,7 @@ function App() {
     const names = await allDatasetNames();
     for (const n of names) await deleteDataset(n);
     await refreshSchema();
-    setBlocks([]); setNewNames([]); setDatasetKinds({}); setCodeText(''); setRestate(''); setFormula('');
+    setBlocks([]); setNewNames([]); setDatasetKinds({}); setDatasetNotes({}); setCodeText(''); setRestate(''); setFormula('');
     
     // === INITIALIZE WITH WELCOME MESSAGE ===
     setResultEntries([initialWelcome]); 
@@ -1302,7 +1402,8 @@ function App() {
       const restored = (proj.blocks||[]).map((b,i)=>({ id:'b'+(++idCounter.current), index:i+1,
         summary:b.summary, code:b.code, label:b.label||'', status:b.status||'ok', formula:b.formula||'', newline:b.newline||false }));
       setBlocks(restored); setNewNames([]);
-      setDatasetKinds(Object.fromEntries(Object.keys(proj.datasets||{}).map(n => [n, 'uploaded'])));
+      setDatasetKinds(proj.datasetKinds || Object.fromEntries(Object.keys(proj.datasets||{}).map(n => [n, 'uploaded'])));
+      setDatasetNotes(proj.datasetNotes || {});
       pushLog({ head:`[${now()}] import`, text:`Project loaded: ${restored.length} blocks, ${Object.keys(proj.datasets||{}).length} datasets. Rerun a block to refresh its output.` });
     } catch(err){ alert('Import failed: '+(err.message||err)); }
     setBusy(false);
@@ -1397,7 +1498,8 @@ function App() {
         { label:'New Project', onClick:newProject },
         { label:'Import Project…', onClick:importProjectClick },
         { sep:true },
-        { label:'Save Project As… (.json)', onClick:saveProject },
+        { label:'Save Project with Data & Blocks… (.json)', onClick:saveProject },
+        { label:'Save blocks as R code… (.R)', onClick:exportRCode },
         { label:'Save All Datasets To Folder… (.csv)', onClick:saveAllDatasets },
       ]}),
       h('div', { className:'spacer' }),
@@ -1420,8 +1522,8 @@ function App() {
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
               h('button', { className:'ds-tool-btn action-btn', title:'Save all datasets', onClick:saveAllDatasets }, '⤓')),
             h('div', { style:{fontSize:'9px',color:'var(--ink-faint)',fontFamily:'var(--mono)',padding:'0 11px 4px',marginTop:'-4px'} }, 'CSV · Stata · SAS · SPSS · Excel · R'),
-            h('div', { className:'ds-list', onMouseDown:beginDatasetAreaSelect, onContextMenu:e=>{ if(selectedDatasets.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'datasets-selected'}); } } },
-              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],datasetKinds[n] || (newNames.includes(n) ? 'created' : 'uploaded'),selectedDatasets.includes(n),{showPreview,setCtx,setSelectedDatasets,onSaveDataset,onRenameDataset,onDeleteDataset}))
+            h('div', { className:'ds-list', onMouseDown:beginDatasetAreaSelect, onContextMenu:e=>{ e.preventDefault(); if(selectedDatasets.length && e.target.closest('.ds-item')) setCtx({x:e.clientX,y:e.clientY,kind:'datasets-selected'}); else if (!e.target.closest('.ds-item')) setCtx({x:e.clientX,y:e.clientY,kind:'dataset-empty'}); } },
+              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],datasetKinds[n] || (newNames.includes(n) ? 'created' : 'uploaded'),selectedDatasets.includes(n),{showPreview,setCtx,setSelectedDatasets,onSaveDataset,onRenameDataset,onDeleteDataset,openDatasetNote,openDatasetEditor,datasetNotes}))
                 : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete')))))),
 
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h') }),
@@ -1468,13 +1570,23 @@ function App() {
                 : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run + Block".'))))) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
-      h('div', { className:'modal'+(modal.full?' full':'') },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
-        modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null}))
+      h('div', { className:'modal'+(modal.full?' full':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : (modal.datasetEdit ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
+        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
+        modal.noteDataset ? h('div',{className:'mbody'},
+            h('div',{className:'note-pane'},
+              h('div',{className:'note-title'}, modal.noteDataset),
+              h('textarea',{ value:datasetNotes[modal.noteDataset] || '', placeholder:'Write memo for this dataset...', onChange:e=>updateDatasetNote(modal.noteDataset, e.target.value) })))
+          : modal.datasetEdit ? h('div',{className:'mbody'},
+            h('div',{className:'dataset-editor'},
+              h('div',{className:'editor-help'}, 'Tab-separated editor. You can paste cells copied from Excel or Google Sheets. The first row is used as column names. Saving replaces the dataset.'),
+              h('textarea',{ value:modal.tsv || '', spellCheck:false, onChange:e=>setModal(m=>({...m, tsv:e.target.value})) }),
+              h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
+                h('button',{onClick:()=>saveDatasetEditor(modal.datasetEdit, modal.tsv || '')},'Save changes'))))
+          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null}))
           : modal.blocksView ? h('div',{className:'mbody',style:{padding:'14px'}}, h('div',{className:'blocks-flow'}, renderBlocksFlow(blocksRef.current, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds})))
           : modal.html ? h('div',{className:'mbody', dangerouslySetInnerHTML:{__html:modal.html}})
           : h('div',{className:'mbody'}, modal.body),
-        h('div', { className:'mfoot' }, h('button',{onClick:()=>setModal(null)},'Close')))),
+        !(modal.noteDataset || modal.datasetEdit) && h('div', { className:'mfoot' }, h('button',{onClick:()=>setModal(null)},'Close')))),
 
     selectionBox && h('div', { className:'select-box', style:{left:selectionBox.x, top:selectionBox.y, width:selectionBox.w, height:selectionBox.h} }),
 
@@ -1488,11 +1600,15 @@ function App() {
     ctx && h('div', { className:'ctx', style:{left:ctx.x, top:ctx.y}, onClick:e=>e.stopPropagation() },
       ctx.kind==='dataset'
         ? [ h('div',{key:1,className:'item', onClick:()=>{ showPreview(ctx.name); setCtx(null); }},h('span',{className:'ico'},'👁'),'Preview'),
-            h('div',{key:2,className:'item', onClick:()=>{ onSaveDataset(ctx.name); setCtx(null); }},h('span',{className:'ico'},'⇩'),'Save'),
-            h('div',{key:3,className:'item', onClick:()=>{ onRenameDataset(ctx.name); setCtx(null); }},h('span',{className:'ico'},'✎'),'Rename'),
+            h('div',{key:2,className:'item', onClick:()=>{ openDatasetEditor(ctx.name); setCtx(null); }},h('span',{className:'ico'},'▦'),'Modify'),
+            h('div',{key:3,className:'item', onClick:()=>{ openDatasetNote(ctx.name); setCtx(null); }},h('span',{className:'ico'},'📝'),'Memo'),
+            h('div',{key:4,className:'item', onClick:()=>{ onSaveDataset(ctx.name); setCtx(null); }},h('span',{className:'ico'},'⇩'),'Save'),
+            h('div',{key:5,className:'item', onClick:()=>{ onRenameDataset(ctx.name); setCtx(null); }},h('span',{className:'ico'},'✎'),'Rename'),
             selectedDatasets.length > 1 && selectedDatasets.includes(ctx.name)
-              ? h('div',{key:4,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`)
-              : h('div',{key:5,className:'item danger', onClick:()=>{ if(confirm(`Delete '${ctx.name}'?`)) onDeleteDataset(ctx.name); setCtx(null); }},h('span',{className:'ico'},'×'),'Delete') ]
+              ? h('div',{key:6,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`)
+              : h('div',{key:7,className:'item danger', onClick:()=>{ if(confirm(`Delete '${ctx.name}'?`)) onDeleteDataset(ctx.name); setCtx(null); }},h('span',{className:'ico'},'×'),'Delete') ]
+        : ctx.kind==='dataset-empty'
+          ? [ h('div',{key:1,className:'item', onClick:()=>{ newBlankDataset(); setCtx(null); }},h('span',{className:'ico'},'＋'),'New dataset') ]
         : ctx.kind==='datasets-selected'
           ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`) ]
         : ctx.kind==='blocks-selected'
@@ -1570,8 +1686,9 @@ function dsItem(n, info, kind, selected, fns) {
     h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]} · ${kind || 'uploaded'}`),
     h('div',{className:'ds-actions'},
       h('button',{className:'ds-ico', title:'Preview', onMouseDown:stop, onClick:e=>{stop(e); fns.showPreview(n);}}, '👁'),
+      h('button',{className:'ds-ico', title:'Modify', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetEditor(n);}}, '▦'),
+      h('button',{className:'ds-ico note-btn', title:'Memo', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetNote(n);}}, (fns.datasetNotes && fns.datasetNotes[n]) ? '📝' : '✎'),
       h('button',{className:'ds-ico', title:'Save CSV', onMouseDown:stop, onClick:e=>{stop(e); fns.onSaveDataset(n);}}, '⇩'),
-      h('button',{className:'ds-ico', title:'Rename', onMouseDown:stop, onClick:e=>{stop(e); fns.onRenameDataset(n);}}, '✎'),
       h('button',{className:'ds-ico', title:'Delete', onMouseDown:stop, onClick:e=>{stop(e); if(confirm(`Delete '${n}'?`)) fns.onDeleteDataset(n);}}, '×')));
 }
 
