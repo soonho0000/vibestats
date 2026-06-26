@@ -3,6 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-YLCHB0RDCX"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-YLCHB0RDCX');
+</script>
 <title>Vibestats — WebR Statistical Analysis</title>
 <style>
   :root {
@@ -80,7 +89,7 @@
 
   .load-btn { margin: 9px 11px; font-family: var(--mono); font-size: 12px; background: var(--accent-dim); color: var(--ink); border: 1px solid var(--accent); border-radius: 5px; padding: 8px; cursor: pointer; text-align: center; }
   .load-btn:hover { background: var(--accent); color: var(--bg); font-weight: 600; }
-  .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; align-content: start; }
+  .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 5px; align-content: start; }
   .ds-item { font-family: var(--mono); font-size: 11px; padding: 6px 7px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 4px; cursor: pointer; }
   .ds-item:hover { border-color: var(--line-bright); background: var(--soft-hover); }
   .ds-item.new { border-left-color: var(--accent); }
@@ -90,6 +99,8 @@
   .ds-item .nm { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ds-item .dim { color: var(--ink-faint); font-size: 10px; margin-top: 2px; }
   .ds-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 11px; padding: 8px; grid-column: 1 / -1; }
+
+  .ds-list.ds-list-full { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); padding: 9px 13px 13px; }
 
   .nl-box { padding: 11px; display: flex; flex-direction: column; gap: 9px; }
   .nl-row { display: flex; gap: 8px; align-items: stretch; }
@@ -1366,7 +1377,7 @@ function App() {
   function showBlockInfo(id){ const b=blocksRef.current.find(x=>x.id===id); if(b) setModal({ blockInfo:id, title:`#${b.index} block`, body:`${b.label?'Label: '+b.label+'\n\n':''}${b.userMemo?'User memo:\n'+b.userMemo+'\n\n':''}Prompt:\n${b.summary || '(none)'}\n\nFormula:\n${b.formula || '(none)'}\n\nCode:\n${b.code}` }); }
   function openBlockEditor(id) {
     const b = blocksRef.current.find(x=>x.id===id); if (!b) return;
-    setModal({ blockEdit:id, title:`Modify block #${b.index}`, userMemo:b.userMemo || 'user memo: ', summary:b.summary || '', formula:b.formula || '', code:b.code || '' });
+    setModal({ blockEdit:id, title:`Modify block #${b.index}`, userMemo:b.userMemo || '', summary:b.summary || '', formula:b.formula || '', code:b.code || '' });
   }
   function saveBlockEditor(id, data) {
     setBlocks(bs=>bs.map(b=>b.id===id ? {...b, userMemo:data.userMemo || '', summary:data.summary || '', formula:data.formula || '', code:data.code || ''} : b));
@@ -1521,6 +1532,7 @@ function App() {
   function fullscreen(title, kind) {
     if (kind==='result') setModal({ title, full:true, streamKind:'result', entries:resultEntries });
     else if (kind==='blocks') setModal({ title, full:true, blocksView:true });
+    else if (kind==='datasets') setModal({ title, full:true, datasetsView:true });
   }
 
   function beginBlockAreaSelect(e) {
@@ -1600,7 +1612,7 @@ function App() {
     h('div', { className:'hsplit workspace' },
       h('div', { className:'vsplit', style:{flex:'0 0 230px'} },
         h('div', { className:'window', style:{flex:'1 1 auto'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Datasets', h('span',{className:'grow'})),
+          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Datasets', h('span',{className:'grow'}), h('button',{className:'tbtn', title:'Fullscreen datasets', onClick:()=>fullscreen('Datasets','datasets')},'⛶')),
           h('div', { className:'content' },
             h('div', { className:'ds-toolbar' },
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
@@ -1667,7 +1679,7 @@ function App() {
           : modal.blockEdit ? h('div',{className:'mbody'},
             h('div',{className:'block-editor'},
               h('label',null,'User memo'),
-              h('textarea',{value:modal.userMemo || 'user memo: ', onChange:e=>setModal(m=>({...m,userMemo:e.target.value}))}),
+              h('textarea',{value:modal.userMemo || '', placeholder:'Write user memo for this block...', onChange:e=>setModal(m=>({...m,userMemo:e.target.value}))}),
               h('label',null,'Prompt'),
               h('textarea',{value:modal.summary || '', onChange:e=>setModal(m=>({...m,summary:e.target.value}))}),
               h('label',null,'Formula'),
@@ -1677,6 +1689,14 @@ function App() {
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
           : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null}))
+          : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
+            h('div', { className:'ds-toolbar' },
+              h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
+              h('button', { className:'ds-tool-btn action-btn', title:'Save all datasets', onClick:saveAllDatasets }, '⤓')),
+            h('div', { style:{fontSize:'9px',color:'var(--ink-faint)',fontFamily:'var(--mono)',padding:'0 13px 5px',marginTop:'-4px'} }, 'CSV · Stata · SAS · SPSS · Excel · R'),
+            h('div', { className:'ds-list ds-list-full', onMouseDown:beginDatasetAreaSelect, onContextMenu:e=>{ e.preventDefault(); if(selectedDatasets.length && e.target.closest('.ds-item')) setCtx({x:e.clientX,y:e.clientY,kind:'datasets-selected'}); else if (!e.target.closest('.ds-item')) setCtx({x:e.clientX,y:e.clientY,kind:'dataset-empty'}); } },
+              dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],datasetKinds[n] || (newNames.includes(n) ? 'created' : 'uploaded'),selectedDatasets.includes(n),{showPreview,setCtx,setSelectedDatasets,onSaveDataset,onRenameDataset,onDeleteDataset,openDatasetNote,openDatasetEditor,datasetNotes}))
+                : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete'))))
           : modal.blocksView ? h('div',{className:'mbody',style:{padding:'14px'}}, h('div',{className:'blocks-flow'}, renderBlocksFlow(blocksRef.current, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds})))
           : modal.html ? h('div',{className:'mbody', dangerouslySetInnerHTML:{__html:modal.html}})
           : h('div',{className:'mbody'}, modal.body),
