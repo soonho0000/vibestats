@@ -235,8 +235,8 @@
   }
   .icon-btn:hover { color: var(--accent) !important; border-color: var(--accent) !important; transform: translateY(-1px); }
   .icon-btn.active { color: var(--accent) !important; border-color: var(--accent) !important; background: var(--accent-dim) !important; }
-  .ds-toolbar { display:flex; align-items:center; gap:7px; margin:9px 10px 6px; }
-  .ds-toolbar .load-btn { margin: 0; flex: 1; border-radius: 999px; font-weight: 700; letter-spacing: .2px; }
+  .ds-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:7px; margin:9px 10px 6px; }
+  .ds-toolbar .load-btn { margin: 0; flex: 0 0 auto; min-width: 118px; max-width: 150px; border-radius: 999px; font-weight: 700; letter-spacing: .2px; padding-left:14px; padding-right:14px; }
   .ds-tool-btn { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 11px; border: 1px solid var(--line-bright); background: linear-gradient(180deg, var(--panel-2), var(--panel)); color: var(--ink-dim); cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:15px; }
   .ds-tool-btn:hover { color: var(--accent); border-color: var(--accent); transform: translateY(-1px); }
   .ds-item { position: relative; padding-bottom: 30px; }
@@ -501,29 +501,23 @@ Intent and follow-up rules:
 - If the previous code contains a model object or lm/glm/arima/test, expand it with additional tables, intervals, diagnostics, and plots.
 
 Default output quality:
-- Prefer a polished, moderately detailed result rather than a minimal summary().
+- Prefer a concise, easy-to-read default result. Do not produce a long detailed report unless the user explicitly asks for details.
 - Put useful analysis output into a variable named result.
-- For statistical analysis, make result a named list of clean tables/values with human-readable names.
+- For statistical analysis, make result a small named list or compact data.frame with clean names.
 - Round numeric tables to a sensible number of digits when useful.
 - If result is a raw data.frame, the app will save it as a dataset and not print all rows.
 - Never use print(dataset), View-like output, or result <- dataset for simple data dumping unless the user explicitly asks to preview a tiny sample. For data outputs over 100 rows, always assign the data.frame to a new dataset name and summarize it briefly instead of printing rows.
+- The app has a Details button for expanded analysis. Save token usage by keeping the first/default analysis relatively brief.
 
 Regression defaults:
-- Do NOT use only result <- summary(m) unless the user explicitly asks for a very simple result.
-- For lm() regression, by default include:
-  1) coefficient table with Estimate, Std.Error, t.value, p.value
-  2) 95% confidence intervals
-  3) R-squared, adjusted R-squared, F-statistic, model p-value
-  4) residual standard error and sample size
-  5) ANOVA table when useful
-  6) residual diagnostics: min/median/max residuals and standardized residual range
-  7) diagnostic plots: plot(m), unless the user asked for no plots
+- For lm() regression, by default include only a compact coefficient table and essential model fit values such as R-squared, adjusted R-squared, sample size, and model p-value.
+- Do not include ANOVA tables, residual diagnostics, confidence intervals, or diagnostic plots by default unless the user explicitly asks for them.
 - Use base R code so it works in WebR.
 
 Other common defaults:
-- For group comparisons, include group means/counts, test statistic, p-value, confidence interval when available, and a simple plot.
-- For correlation, include correlation coefficient, p-value, confidence interval if available, sample size, and scatter plot when appropriate.
-- For summary statistics, include n, mean, sd, min, median, max, and missing count for numeric columns.
+- For group comparisons, include a compact table of group means/counts and the main test statistic and p-value.
+- For correlation, include correlation coefficient, p-value, and sample size. Add a plot only when the user asks for a plot.
+- For summary statistics, include n, missing count, mean, sd, min, median, and max for numeric columns.
 - For plots, choose informative axis labels and titles.
 
 Formula field:
@@ -534,9 +528,9 @@ Formula field:
 
 Examples:
 input:"regress y on x1 x2 in df"
-output:{"code":"m <- lm(y ~ x1 + x2, data=df)\\ns <- summary(m)\\ncoef_table <- as.data.frame(s$coefficients)\\ncoef_table$term <- rownames(coef_table)\\nrownames(coef_table) <- NULL\\nnames(coef_table) <- c('estimate','std_error','t_value','p_value','term')\\nci <- as.data.frame(confint(m))\\nci$term <- rownames(ci)\\nrownames(ci) <- NULL\\nnames(ci) <- c('ci_low','ci_high','term')\\nmodel_fit <- data.frame(r_squared=s$r.squared, adj_r_squared=s$adj.r.squared, residual_se=s$sigma, n=nobs(m), f_statistic=unname(s$fstatistic[1]), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\\npar(mfrow=c(2,2))\\nplot(m)\\nresult <- list(coefficients=round(coef_table,4), confidence_intervals=round(ci,4), model_fit=round(model_fit,4), anova=anova(m))","summary":"Detailed OLS regression of y on x1 and x2 in df.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}
+output:{"code":"m <- lm(y ~ x1 + x2, data=df)\ns <- summary(m)\ncoef_table <- as.data.frame(s$coefficients)\ncoef_table$term <- rownames(coef_table)\nrownames(coef_table) <- NULL\nnames(coef_table) <- c('estimate','std_error','t_value','p_value','term')\nmodel_fit <- data.frame(r_squared=s$r.squared, adj_r_squared=s$adj.r.squared, n=nobs(m), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\nresult <- list(coefficients=round(coef_table,4), model_fit=round(model_fit,4))","summary":"Concise OLS regression of y on x1 and x2 in df.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}
 input:"더 상세한 회귀분석 결과를 알려줘"
-output:{"code":"# Reuse the previous regression idea and expand the output; replace variables with the actual previous model variables.\\nm <- lm(y ~ x1 + x2, data=df)\\ns <- summary(m)\\ncoef_table <- as.data.frame(s$coefficients)\\ncoef_table$term <- rownames(coef_table)\\nrownames(coef_table) <- NULL\\nnames(coef_table) <- c('estimate','std_error','t_value','p_value','term')\\nci <- as.data.frame(confint(m))\\nci$term <- rownames(ci)\\nrownames(ci) <- NULL\\nnames(ci) <- c('ci_low','ci_high','term')\\nmodel_fit <- data.frame(r_squared=s$r.squared, adj_r_squared=s$adj.r.squared, residual_se=s$sigma, n=nobs(m), f_statistic=unname(s$fstatistic[1]), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\\nresid_diag <- data.frame(min_resid=min(resid(m)), median_resid=median(resid(m)), max_resid=max(resid(m)), min_std_resid=min(rstandard(m)), max_std_resid=max(rstandard(m)))\\npar(mfrow=c(2,2))\\nplot(m)\\nresult <- list(coefficients=round(coef_table,4), confidence_intervals=round(ci,4), model_fit=round(model_fit,4), residual_diagnostics=round(resid_diag,4), anova=anova(m))","summary":"Expanded detailed regression output with fit statistics, confidence intervals, ANOVA, and diagnostics.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}`;
+output:{"code":"m <- lm(y ~ x1 + x2, data=df)\ns <- summary(m)\ncoef_table <- as.data.frame(s$coefficients)\ncoef_table$term <- rownames(coef_table)\nrownames(coef_table) <- NULL\nnames(coef_table) <- c('estimate','std_error','t_value','p_value','term')\nci <- as.data.frame(confint(m))\nci$term <- rownames(ci)\nrownames(ci) <- NULL\nnames(ci) <- c('ci_low','ci_high','term')\nmodel_fit <- data.frame(r_squared=s$r.squared, adj_r_squared=s$adj.r.squared, residual_se=s$sigma, n=nobs(m), f_statistic=unname(s$fstatistic[1]), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\nresid_diag <- data.frame(min_resid=min(resid(m)), median_resid=median(resid(m)), max_resid=max(resid(m)), min_std_resid=min(rstandard(m)), max_std_resid=max(rstandard(m)))\npar(mfrow=c(2,2))\nplot(m)\nresult <- list(coefficients=round(coef_table,4), confidence_intervals=round(ci,4), model_fit=round(model_fit,4), residual_diagnostics=round(resid_diag,4), anova=anova(m))","summary":"Expanded detailed regression output with fit statistics, confidence intervals, ANOVA, and diagnostics.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}`;
 
 function formatSchema(s) {
   const k = Object.keys(s);
@@ -585,6 +579,43 @@ async function parseNL(text, lastContext=null) {
   let d; try { d = JSON.parse(raw); } catch(e){ throw new Error('Failed to parse LLM JSON response'); }
   if (!d.code) throw new Error("Missing 'code' field");
   return { code:String(d.code), summary:String(d.summary || text), formula:String(d.formula || '') };
+}
+
+
+async function parseDetailsRequest(entry) {
+  const schema = await getSchema();
+  const msg = [{ role:'user', content:
+`You are Vibestats. Generate an expanded detailed follow-up R analysis based on the previous analysis.
+Return ONLY one JSON object, no prose:
+{"code":"<R code, newlines as \\n>","summary":"<short English summary>","formula":"<formula or empty string>"}
+
+Current datasets:
+${formatSchema(schema)}
+
+Previous analysis summary:
+${entry?._summary || '(none)'}
+
+Previous formula:
+${entry?._formula || '(none)'}
+
+Previous R code:
+${entry?._code || '(none)'}
+
+Previous visible result excerpt:
+${String((entry?.text || '') + '\n' + (entry?.html || '')).slice(0, 2500)}
+
+Rules:
+- This is requested only after the user clicked Details, so now provide a richer analysis.
+- Reuse the previous analysis idea and extend it with appropriate additional tables, diagnostics, confidence intervals, model checks, plots, or robustness checks when relevant.
+- Use only real dataset and column names from the schema.
+- Put useful output in result as a named list of clean tables/values.
+- Do not print large raw datasets.
+- Keep the code self-contained enough to run even if the previous model object is not available.
+JSON:` }];
+  const raw = await callLLM(msg, true);
+  let d; try { d = JSON.parse(raw); } catch(e){ throw new Error('Failed to parse details JSON response'); }
+  if (!d.code) throw new Error("Details response did not include code.");
+  return { code:String(d.code), summary:String(d.summary || 'Detailed follow-up analysis'), formula:String(d.formula || entry?._formula || '') };
 }
 
 async function repairRCode(code, summary, errorText, attempt) {
@@ -1039,7 +1070,7 @@ function useSplitter() {
   }, []);
 }
 
-function StreamPane({ entries, kind, onInterpret, onSaveResult }) {
+function StreamPane({ entries, kind, onInterpret, onSaveResult, onDetails }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [entries.length]);
   if (!entries.length) return h('div', { className:'stream', ref },
@@ -1058,6 +1089,7 @@ function StreamPane({ entries, kind, onInterpret, onSaveResult }) {
         h('div', { className:'entry-actions' },
           onInterpret && (en.interp ? h('div',{className:'interp'}, en.interp)
             : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? '해석 중…' : 'Interpret')),
+          onDetails && en._code && !en._isDetail && h('button', { className:'nl-go', onClick:()=>onDetails(en.id), disabled:!!en.detailing }, en.detailing ? 'Details…' : 'Details'),
           onSaveResult && en.resultKey && h('button', { className:'nl-go', onClick:()=>onSaveResult(en.id) }, 'Save')))));
 }
 
@@ -1121,10 +1153,15 @@ function App() {
     });
   }
   function openDatasetNote(name) {
-    setModal({ noteDataset:name, title:`Memo — ${name}`, full:false });
+    setModal({ noteDataset:name, title:`Memo — ${name}`, full:false, noteValue:datasetNotes[name] || '' });
   }
   function updateDatasetNote(name, value) {
     setDatasetNotes(prev => ({...prev, [name]: value}));
+  }
+  function saveDatasetNote(name, value) {
+    updateDatasetNote(name, value || '');
+    pushLog({ head:`[${now()}] dataset memo saved`, text:`Memo saved for dataset '${name}'.` });
+    setModal(null);
   }
   async function openDatasetEditor(name) {
     try {
@@ -1260,7 +1297,7 @@ function App() {
     setBusy(true); setParseErr('');
     const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40));
     await refreshSchema();
-    dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code);
+    dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code, rr.formula || formula, false);
     if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
     hideProgress(); setBusy(false);
   }
@@ -1277,7 +1314,7 @@ function App() {
     const block = { id, index, summary:rr.summary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||'', status, label:'', newline:false, userMemo:'' };
     setBlocks(bs => [...bs, block]);
     setActiveId(id);
-    dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code);
+    dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code, rr.formula || formula, false);
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
     if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
     if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
@@ -1285,7 +1322,7 @@ function App() {
     hideProgress(); setBusy(false);
   }
 
-  function dispatchOutput(res, head, code) {
+  function dispatchOutput(res, head, code, runFormula=formula, isDetail=false) {
     const ts = `[${now()}] ${head}`;
     if (res.error) {
       pushLog({ head: ts + ' — FAILED', error:true, text: cleanErrorMessage(res.error) });
@@ -1303,14 +1340,14 @@ function App() {
     let displayed = false;
     if (res.resultHtml || (res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot) {
       pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: res.resultHtml || '', plot: res.plot || null,
-                   _code: code, _summary: head, resultKey: res.resultKey || null });
+                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: res.resultKey || null });
       displayed = true;
     }
     if (!displayed && res.consoleText && res.consoleText.trim()) {
       const consoleLines = res.consoleText.split(/\r?\n/).length;
       if (consoleLines <= 100) {
         pushResult({ head: ts + ' — console output', text: res.consoleText.trim(), html:'', plot:null,
-                     _code: code, _summary: head, resultKey: null });
+                     _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: null });
         displayed = true;
       } else {
         pushLog({ head: ts + ' — console output suppressed', text:'Console output had more than 100 lines, so it was not printed. Assign large outputs to a dataset to inspect them.' });
@@ -1325,7 +1362,7 @@ function App() {
       setLastRunContext({
         summary: head,
         code,
-        formula,
+        formula: runFormula || '',
         resultText: res.resultText || '',
         resultHtml: res.resultHtml || '',
         consoleText: res.consoleText || '',
@@ -1347,6 +1384,25 @@ function App() {
       setResultEntries(es => es.map(x => x.id===entryId ? {...x, interp:'Interpretation failed: '+(e.message||e), interpreting:false} : x));
     }
   }
+  async function onDetailsResult(entryId) {
+    const en = resultEntries.find(e=>e.id===entryId);
+    if (!en || !en._code) return;
+    setResultEntries(es => es.map(e => e.id===entryId ? {...e, detailing:true} : e));
+    setBusy(true); setParseErr(''); showProgress('Generating detailed analysis code…', 35, 'Details 버튼을 누른 경우에만 추가 API 호출을 사용합니다.');
+    try {
+      const d = await parseDetailsRequest(en);
+      setCodeText(d.code); setRestate(d.summary); setFormula(d.formula || '');
+      const rr = await runCodeWithRepair(d.code, d.summary);
+      await refreshSchema();
+      dispatchOutput(rr.res, `${d.summary || en._summary || 'Detailed analysis'} — Details`, rr.code, rr.formula || d.formula || en._formula || '', true);
+      if (rr.repaired && !rr.res.error) setParseErr('Details 분석 코드가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
+    } catch(e) {
+      pushLog({ head:`[${now()}] details failed`, error:true, text:e.message||String(e) });
+    }
+    setResultEntries(es => es.map(e => e.id===entryId ? {...e, detailing:false} : e));
+    hideProgress(); setBusy(false);
+  }
+
   async function onSaveResult(entryId) {
     const en = resultEntries.find(e=>e.id===entryId);
     if (!en || !en.resultKey) return;
@@ -1369,7 +1425,7 @@ function App() {
     const status = rr.res.error ? 'err' : 'ok';
     setBlocks(bs=>bs.map(x=>x.id===id?{...x,status,code:rr.code,summary:rr.summary||x.summary,formula:rr.formula||x.formula}:x));
     setActiveId(id);
-    dispatchOutput(rr.res, `#${b.index} ${rr.summary||b.summary||''} (rerun)`.trim(), rr.code);
+    dispatchOutput(rr.res, `#${b.index} ${rr.summary||b.summary||''} (rerun)`.trim(), rr.code, rr.formula || b.formula || formula, false);
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
     if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
     hideProgress();
@@ -1631,7 +1687,7 @@ function App() {
             h('button',{className:'tbtn', title:'Clear', onClick:()=>setResultEntries([])},'🧹'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Results','result')},'⛶')),
           h('div', { className:'content' },
-            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSaveResult:onSaveResult }))),
+            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSaveResult:onSaveResult, onDetails:onDetailsResult }))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window', style:{flex:'0 0 270px'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt → R Code', h('span',{className:'grow'})),
@@ -1671,7 +1727,9 @@ function App() {
         modal.noteDataset ? h('div',{className:'mbody'},
             h('div',{className:'note-pane'},
               h('div',{className:'note-title'}, modal.noteDataset),
-              h('textarea',{ value:datasetNotes[modal.noteDataset] || '', placeholder:'Write memo for this dataset...', onChange:e=>updateDatasetNote(modal.noteDataset, e.target.value) })))
+              h('textarea',{ value:modal.noteValue || '', placeholder:'Write memo for this dataset...', onChange:e=>setModal(m=>({...m,noteValue:e.target.value})) }),
+              h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
+                h('button',{onClick:()=>saveDatasetNote(modal.noteDataset, modal.noteValue)},'Save'))))
           : modal.datasetEdit ? h('div',{className:'mbody'},
             h(SheetEditor,{ grid:modal.sheetGrid || makeBlankGrid(12,5), setGrid:g=>setModal(m=>({...m, sheetGrid:g})), help:'Edit cells directly. You can paste copied Excel or Google Sheets cells into any cell. The first row is used as column names.', onSave:()=>saveDatasetEditor(modal.datasetEdit, modal.sheetGrid || makeBlankGrid(12,5)), saveLabel:'Save changes' }))
           : modal.newDataset ? h('div',{className:'mbody'},
@@ -1688,7 +1746,7 @@ function App() {
               h('textarea',{className:'code-edit', value:modal.code || '', spellCheck:false, onChange:e=>setModal(m=>({...m,code:e.target.value}))}),
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
-          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null}))
+          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null, onDetails: modal.streamKind==='result'?onDetailsResult:null}))
           : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
             h('div', { className:'ds-toolbar' },
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
