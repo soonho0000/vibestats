@@ -542,13 +542,51 @@ Example:
 input:"regress y on x1 x2 in df"
 output:{"code":"m <- lm(y ~ x1 + x2, data=df)\\ns <- summary(m)\\nct <- as.data.frame(round(s$coefficients,4))\\nct$term <- rownames(ct); rownames(ct) <- NULL\\nnames(ct) <- c('estimate','std_error','t_value','p_value','term')\\nct <- ct[c('term','estimate','std_error','t_value','p_value')]\\nfit <- data.frame(r_squared=round(s$r.squared,4), adj_r_squared=round(s$adj.r.squared,4), n=nobs(m), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\\nresult <- list(coefficients=ct, model_fit=fit)","summary":"Concise OLS regression of y on x1 and x2 in df.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}`;
 
-function formatSchema(s) {
+// ===== Token / privacy controls =====
+// Keep the fixed system prompts at the front of API calls so provider-side prompt caching can reuse them.
+// Dynamic information such as schema, previous results, and the user's prompt is kept in the user message.
+const SEND_SCHEMA_SAMPLES = false;       // false = send names/types/shape only; true = include 1-2 sample values per column
+const SHORT_CONTEXT_CHARS = 1200;        // ordinary follow-up context
+const DETAILS_CONTEXT_CHARS = 1800;      // details button context
+const INTERPRET_RESULT_CHARS = 2500;     // result text sent only when Interpret is clicked
+const MAX_LLM_CHARS = 30000;             // client-side guard for request size
+
+const DETAILS_SYSTEM_PROMPT = `You are Vibestats. Generate an expanded detailed follow-up R analysis from a previous result.
+Return ONLY one JSON object, no prose:
+{"code":"<R code, \\n for newlines>","summary":"<short English summary>","formula":"<formula or empty string>"}
+Rules:
+- This prompt is used only after the user clicks Details, so provide a richer analysis.
+- Reuse the previous analysis idea and extend it with appropriate additional tables, diagnostics, confidence intervals, model checks, plots, or robustness checks when relevant.
+- Use only real dataset and column names from the provided schema.
+- Put useful output in result as a named list of clean tables/values.
+- Do not print large raw datasets.
+- Keep the code self-contained enough to run even if the previous model object is not available.`;
+
+const REPAIR_SYSTEM_PROMPT = `You fix R code so it runs correctly in the WebR environment.
+Return ONLY JSON: {"code":"...","summary":"...","formula":"...","reason":"brief reason"}
+Rules:
+- Use only real dataset and column names from the provided schema.
+- Keep the user's intent.
+- If the user is creating a dataset, assign it to a syntactic dataset name.
+- Put useful analysis output in result; raw data.frame result will be saved as a dataset automatically.`;
+
+const INTERPRET_SYSTEM_PROMPT = `아래 R 통계분석 결과를 통계 비전공자도 이해할 수 있게 한국어로 아주 쉽고 직관적으로 해석해 주세요.
+Rules:
+- 2~4문장만 쓰세요.
+- 어려운 통계용어는 피하고, 꼭 필요하면 쉬운 말로 바꿔 주세요.
+- 숫자의 의미, 증가/감소 방향, 중요한지 여부, 한계만 간단히 말하세요.
+- 코드를 설명하지 마세요.`;
+
+function formatSchema(s, includeSamples=SEND_SCHEMA_SAMPLES) {
   const k = Object.keys(s);
   if (!k.length) return '(none)';
   return k.map(n => {
     const ds = s[n];
     if (ds.fields && ds.fields.length) {
-      const cols = ds.fields.map(f => `${f.name}:${f.type}${f.sample?`(e.g. ${f.sample})`:''}`).join(', ');
+      const cols = ds.fields.map(f => {
+        const sample = includeSamples && f.sample ? `(e.g. ${f.sample})` : '';
+        return `${f.name}:${f.type}${sample}`;
+      }).join(', ');
       return `- ${n} [${ds.shape[0]}x${ds.shape[1]}]: ${cols}`;
     }
     return `- ${n}: columns=${JSON.stringify(ds.columns)}, shape=${JSON.stringify(ds.shape)}`;
@@ -557,7 +595,7 @@ function formatSchema(s) {
 
 function formatLastContext(ctx) {
   if (!ctx) return '(none)';
-  const result = (ctx.resultText || '').toString().slice(0, 2500);
+  const result = ((ctx.resultText || '') + '\n' + htmlToText(ctx.resultHtml || '')).toString().trim().slice(0, SHORT_CONTEXT_CHARS);
   return [
     `Previous user/task summary: ${ctx.summary || '(none)'}`,
     `Previous R code:\n${ctx.code || '(none)'}`,
@@ -571,12 +609,12 @@ function looksLikeFollowUp(text) {
   return /(더\s*(자세|상세|많이|깊게)|자세한|상세한|추가|진단|해석|보고서|좀\s*더|more detailed|more detail|expand|deeper|diagnostic|explain more|full result)/i.test(text || '');
 }
 async function callLLM(messages, jsonMode) {
-  // Client-side guard: cap total payload so a runaway prompt can't blow up tokens/cost.
-  const totalChars = messages.reduce((s,m)=>s + (m.content ? m.content.length : 0), 0);
-  const MAX_CHARS = 60000;
-  if (totalChars > MAX_CHARS) {
-    messages = messages.map(m => m.role === 'user' && m.content && m.content.length > MAX_CHARS*0.8
-      ? { ...m, content: m.content.slice(0, Math.floor(MAX_CHARS*0.8)) + '\n…(truncated)' } : m);
+  // Client-side guard: cap total payload so a runaway prompt cannot blow up tokens/cost.
+  const totalChars = messages.reduce((sum, m) => sum + (m.content ? m.content.length : 0), 0);
+  if (totalChars > MAX_LLM_CHARS) {
+    messages = messages.map(m => m.role === 'user' && m.content && m.content.length > MAX_LLM_CHARS * 0.75
+      ? { ...m, content: m.content.slice(0, Math.floor(MAX_LLM_CHARS * 0.75)) + '\n…(truncated)' }
+      : m);
   }
   const body = { model:OPENAI_MODEL, messages };
   if (jsonMode) body.response_format = { type:'json_object' };
@@ -594,6 +632,8 @@ async function callLLM(messages, jsonMode) {
     throw new Error('LLM request failed (' + resp.status + '). ' + errText.slice(0, 200));
   }
   const data = await resp.json();
+  const cached = data?.usage?.prompt_tokens_details?.cached_tokens ?? data?.usage?.input_tokens_details?.cached_tokens;
+  if (typeof cached === 'number') console.debug('[Vibestats] cached prompt tokens:', cached, 'usage:', data.usage);
   return data?.choices?.[0]?.message?.content ?? data?.content ?? data?.message ?? '';
 }
 async function parseNL(text, lastContext=null) {
@@ -614,38 +654,13 @@ async function parseNL(text, lastContext=null) {
   return { code:String(d.code), summary:String(d.summary || text), formula:String(d.formula || '') };
 }
 
-
 async function parseDetailsRequest(entry) {
   const schema = await getSchema();
-  const msg = [{ role:'user', content:
-`You are Vibestats. Generate an expanded detailed follow-up R analysis based on the previous analysis.
-Return ONLY one JSON object, no prose:
-{"code":"<R code, newlines as \\n>","summary":"<short English summary>","formula":"<formula or empty string>"}
-
-Current datasets:
-${formatSchema(schema)}
-
-Previous analysis summary:
-${entry?._summary || '(none)'}
-
-Previous formula:
-${entry?._formula || '(none)'}
-
-Previous R code:
-${entry?._code || '(none)'}
-
-Previous visible result excerpt:
-${String((entry?.text || '') + '\n' + htmlToText(entry?.html || '')).slice(0, 2500)}
-
-Rules:
-- This is requested only after the user clicked Details, so now provide a richer analysis.
-- Reuse the previous analysis idea and extend it with appropriate additional tables, diagnostics, confidence intervals, model checks, plots, or robustness checks when relevant.
-- Use only real dataset and column names from the schema.
-- Put useful output in result as a named list of clean tables/values.
-- Do not print large raw datasets.
-- Keep the code self-contained enough to run even if the previous model object is not available.
-JSON:` }];
-  const raw = await callLLM(msg, true);
+  const userMsg = `Current datasets:\n${formatSchema(schema)}\n\nPrevious analysis summary:\n${entry?._summary || '(none)'}\n\nPrevious formula:\n${entry?._formula || '(none)'}\n\nPrevious R code:\n${entry?._code || '(none)'}\n\nPrevious visible result excerpt:\n${String((entry?.text || '') + '\n' + htmlToText(entry?.html || '')).slice(0, DETAILS_CONTEXT_CHARS)}\n\nJSON:`;
+  const raw = await callLLM([
+    { role:'system', content: DETAILS_SYSTEM_PROMPT },
+    { role:'user', content: userMsg }
+  ], true);
   let d; try { d = JSON.parse(raw); } catch(e){ throw new Error('Failed to parse details JSON response'); }
   if (!d.code) throw new Error("Details response did not include code.");
   return { code:String(d.code), summary:String(d.summary || 'Detailed follow-up analysis'), formula:String(d.formula || entry?._formula || '') };
@@ -653,48 +668,22 @@ JSON:` }];
 
 async function repairRCode(code, summary, errorText, attempt) {
   const schema = await getSchema();
-  const msg = [{ role:'user', content:
-`Fix this R code so it runs correctly in the described WebR environment. Return ONLY JSON: {"code":"...","summary":"...","formula":"...","reason":"brief reason"}
-
-Current datasets:
-${formatSchema(schema)}
-
-Original task:
-${summary || '(not provided)'}
-
-Current R code:
-${code}
-
-Error message:
-${errorText}
-
-Attempt number: ${attempt}/5
-Rules:
-- Use only real dataset and column names from the schema.
-- Keep the user's intent.
-- If the user is creating a dataset, assign it to a syntactic dataset name.
-- Put useful analysis output in result; raw data.frame result will be saved as a dataset automatically.` }];
-  const raw = await callLLM(msg, true);
+  const userMsg = `Current datasets:\n${formatSchema(schema)}\n\nOriginal task:\n${summary || '(not provided)'}\n\nCurrent R code:\n${code}\n\nError message:\n${errorText}\n\nAttempt number: ${attempt}/5\nJSON:`;
+  const raw = await callLLM([
+    { role:'system', content: REPAIR_SYSTEM_PROMPT },
+    { role:'user', content: userMsg }
+  ], true);
   let d; try { d = JSON.parse(raw); } catch(e){ throw new Error('Failed to parse repair JSON response'); }
   if (!d.code) throw new Error('Repair response did not include code.');
   return { code:String(d.code), summary:String(d.summary || summary || ''), formula:String(d.formula || ''), reason:String(d.reason || '') };
 }
 
 async function interpretResult(summary, code, resultText) {
-  const msg = [{ role:'user', content:
-`아래 R 통계분석 결과를 통계 비전공자도 이해할 수 있게 한국어로 아주 쉽고 직관적으로 해석해 주세요.
-- 2~4문장만 쓰세요.
-- 어려운 통계용어는 피하고, 꼭 필요하면 쉬운 말로 바꿔 주세요.
-- 숫자의 의미, 증가/감소 방향, 중요한지 여부, 한계만 간단히 말하세요.
-- 코드를 설명하지 마세요.
-
-분석 목적: ${summary}
-R code:
-${code}
-
-결과:
-${resultText.slice(0, 4000)}` }];
-  return (await callLLM(msg, false)).trim();
+  const userMsg = `분석 목적: ${summary}\nR code:\n${code}\n\n결과:\n${String(resultText || '').slice(0, INTERPRET_RESULT_CHARS)}`;
+  return (await callLLM([
+    { role:'system', content: INTERPRET_SYSTEM_PROMPT },
+    { role:'user', content: userMsg }
+  ], false)).trim();
 }
 
 async function executeR(code) {
@@ -1931,7 +1920,7 @@ function ProductInfo() {
       'This product runs R directly in the browser using WebR. It can import common statistical data files, generate R code from natural language, execute analyses locally in the browser, and keep datasets/blocks inside a saved project file.'),
     h('div', {className:'prod-note', style:{borderLeft:'4px solid var(--amber)'}},
       h('b', null, 'Privacy notice. '),
-      'Your raw data stays in your browser and is never uploaded. However, to generate and interpret R code, the following are sent to the AI service: your prompt text, dataset names, column names, column types with a few sample values, previously run code, and a short excerpt of previous results. If column names or result values are sensitive, they may leave your browser. Do not analyze confidential data you are not permitted to share with a third-party AI service.'),
+      'Your raw data stays in your browser and is never uploaded. However, to generate and interpret R code, the following are sent to the AI service: your prompt text, dataset names, column names, column types, previously run code, and a short excerpt of previous results. Sample values are not sent by default unless SEND_SCHEMA_SAMPLES is turned on in the code. If column names or result values are sensitive, they may leave your browser. Do not analyze confidential data you are not permitted to share with a third-party AI service.'),
     h('h4', null, 'Open-source / service notices'),
     h('table', null,
       h('thead', null, h('tr', null, h('th', null, 'Component'), h('th', null, 'Purpose'), h('th', null, 'License / Notice'))),
