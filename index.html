@@ -545,7 +545,9 @@ Environment:
 - Use only the real dataset/column names given; never invent names. Use the provided column TYPES: convert text-coded numbers with as.numeric(), dates with as.Date(); for price series prefer diff(log(x)).
 
 Output rules:
-- Put the answer in a variable named result, as a small named list or compact data.frame with clean names; round numbers sensibly.
+- Every successful analysis must end with a non-empty variable named result. Never leave result NULL.
+- Put the answer in result as a small named list or compact data.frame with clean names; round numbers sensibly.
+- If you create/filter/merge/transform a dataset because the user explicitly asked, also set result to a compact summary with the new dataset name, row count, column count, and key variables.
 - Do not assign intermediate tables to the global environment. Use local variables for intermediate objects.
 - Do not create result datasets unless the user explicitly asks to save/create a dataset. Large outputs should be summarized in result rather than assigned as datasets.
 - Keep the DEFAULT analysis concise — just the essentials. An Expand button exists for light expansion, and Diagnostics exists for heavier checks, so do not pre-expand. Examples of "essentials":
@@ -581,6 +583,7 @@ Rules:
 - For correlation, add n and a compact p-value table only if useful.
 - Do NOT create diagnostic plots, residual plots, ANOVA tables, robustness checks, or long reports unless explicitly requested.
 - Use only real dataset and column names from the provided schema.
+- Every successful analysis must end with a non-empty result object. Never leave result NULL.
 - Put useful output in result as a named list of clean compact tables/values.
 - Do not print large raw datasets or create new datasets.
 - Keep the code self-contained enough to run even if the previous model object is not available.`;
@@ -595,6 +598,7 @@ Rules:
 - For time series, include stationarity/autocorrelation checks only when relevant.
 - Do not run robustness checks or alternative models unless clearly useful.
 - Use only real dataset and column names from the provided schema.
+- Every successful analysis must end with a non-empty result object. Never leave result NULL.
 - Put useful output in result as compact named tables/values.
 - Do not print large raw datasets or create new datasets.`;
 
@@ -604,6 +608,7 @@ Rules:
 - Use only real dataset and column names from the provided schema.
 - Keep the user's intent.
 - If the user is creating a dataset, assign it to a syntactic dataset name.
+- Every successful fix must end with a non-empty result object. Never leave result NULL.
 - Put useful analysis output in result. Do not create result datasets unless the user explicitly asked to save/create one.`;
 
 const INTERPRET_SYSTEM_PROMPT = `아래 R 통계분석 결과를 통계 비전공자도 이해할 수 있게 한국어로 아주 쉽고 직관적으로 해석해 주세요.
@@ -951,6 +956,7 @@ async function executeR(code, allowNewDatasets=false) {
     await getSchema();
     let after = Object.keys(window._dsCache||{});
     let newOnes = after.filter(n=>!before.has(n));
+    const removedNewOnes = newOnes.slice();
     if (newOnes.length && !allowNewDatasets) {
       try {
         await webR.evalRVoid(`rm(list=${JSON.stringify(newOnes)}, envir=.nlstat_env)`);
@@ -958,6 +964,14 @@ async function executeR(code, allowNewDatasets=false) {
       } catch(e) {}
       newOnes = [];
       savedDataset = '';
+    }
+    const hasDisplay = !!(resultHtml || (resultText && resultText.trim()) || (consoleText && consoleText.trim()) || plot);
+    if (!hasDisplay) {
+      const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      const datasetNote = removedNewOnes.length && !allowNewDatasets
+        ? `<br><br>Temporary dataset output (${esc(removedNewOnes.join(', '))}) was not added to the Datasets panel because automatic result saving is off.`
+        : '';
+      resultHtml = `<section class="notice-card"><b>No displayable result</b><br>The code ran successfully, but it did not produce a displayable <code>result</code> object, console output, or plot.${datasetNote}<br><br>Tip: end the R code with a compact object such as <code>result &lt;- summary_table</code> or <code>result &lt;- list(...)</code>.</section>`;
     }
     return { resultText, resultHtml, consoleText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
   }
