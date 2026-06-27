@@ -89,7 +89,7 @@
 
   .load-btn { margin: 9px 11px; font-family: var(--mono); font-size: 12px; background: var(--accent-dim); color: var(--ink); border: 1px solid var(--accent); border-radius: 5px; padding: 8px; cursor: pointer; text-align: center; }
   .load-btn:hover { background: var(--accent); color: var(--bg); font-weight: 600; }
-  .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; align-content: start; }
+  .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); gap: 5px; align-content: start; }
   .ds-item { font-family: var(--mono); font-size: 11px; padding: 6px 7px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 4px; cursor: pointer; }
   .ds-item:hover { border-color: var(--line-bright); background: var(--soft-hover); }
   .ds-item.new { border-left-color: var(--accent); }
@@ -113,6 +113,23 @@
   .interp-box { background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 5px; padding: 9px 11px; font-size: 12px; color: var(--ink-dim); line-height: 1.5; }
   .interp-box .restate { color: var(--ink); }
   .interp-box .formula { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--line); font-family: var(--mono); font-size: 13px; color: var(--amber); white-space: pre-wrap; }
+  .scope-zone { position: relative; min-height: 42px; border: 1px dashed var(--line-bright); border-radius: 9px; background: color-mix(in srgb, var(--panel-2) 55%, var(--bg)); padding: 7px 9px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .scope-zone.dragover { border-color: var(--accent); background: var(--accent-dim); }
+  .scope-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 10px; }
+  .scope-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-width: 190px; border: 1px solid var(--line-bright); border-radius: 999px; background: var(--panel); color: var(--ink); padding: 4px 8px; font-family: var(--mono); font-size: 11px; cursor: pointer; }
+  .scope-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .scope-chip .scope-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scope-chip .scope-count { color: var(--ink-faint); font-size: 10px; }
+  .scope-chip .scope-x { border: 0; background: transparent; color: var(--ink-faint); cursor: pointer; font-family: var(--mono); padding: 0 2px; }
+  .scope-chip .scope-x:hover { color: var(--red); }
+  .var-pop { position: absolute; z-index: 70; top: calc(100% + 6px); left: 0; width: min(360px, 72vw); max-height: 260px; overflow: auto; border: 1px solid var(--line-bright); border-radius: 9px; background: var(--panel); box-shadow: 0 12px 34px rgba(0,0,0,.45); padding: 8px; color: var(--ink); }
+  .var-pop-head { display: flex; align-items: center; gap: 8px; padding: 3px 4px 7px; border-bottom: 1px solid var(--line); margin-bottom: 6px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+  .var-pop-head b { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .var-pop-head button { margin-left: auto; font-family: var(--mono); font-size: 10px; padding: 3px 7px; border: 1px solid var(--line-bright); border-radius: 6px; background: var(--panel-2); color: var(--ink-dim); cursor: pointer; }
+  .var-pop-head button:hover { border-color: var(--accent); color: var(--accent); }
+  .var-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .var-pill { border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); color: var(--ink-dim); padding: 3px 8px; font-family: var(--mono); font-size: 10px; cursor: pointer; }
+  .var-pill.on { border-color: var(--accent); color: var(--ink); background: var(--accent-dim); }
   .code-wrap { display: flex; gap: 8px; align-items: stretch; }
   .code-wrap textarea { flex: 1; min-height: 84px; height: 84px; resize: vertical; font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--bg); border: 1px solid var(--line-bright); border-radius: 5px; padding: 9px 11px; outline: none; line-height: 1.5; white-space: pre; overflow-x: auto; }
   .code-wrap textarea:focus { border-color: var(--accent); }
@@ -260,7 +277,7 @@
   .modal h3, .modal .mbody, .modal .mfoot button,
   .ctx .item, .entry-actions button,
   .progress-card, .progress-card .ptitle, .progress-card .pmsg, .progress-card .pnote,
-  .result-pre, .icon-btn, .ds-tool-btn, .ds-ico {
+  .result-pre, .icon-btn, .ds-tool-btn, .ds-ico, .scope-zone, .scope-chip, .var-pop, .var-pill {
     font-size: calc(var(--base-px, 12px) * var(--font-scale)) !important;
   }
   .menu > .mtitle, .menu .ditem, .menubar .right .logo { --base-px: 12px; }
@@ -623,6 +640,17 @@ function formatLastContext(ctx) {
   ].join('\n\n');
 }
 
+function formatSelectedScope(scope, schema) {
+  const selected = (scope || []).filter(x => x && schema && schema[x.name]);
+  if (!selected.length) return '(none)';
+  return selected.map(x => {
+    const ds = schema[x.name] || {};
+    const allCols = (ds.fields || []).map(f => `${f.name}:${f.type}`).join(', ') || (ds.columns || []).join(', ');
+    const vars = (x.vars && x.vars.length) ? x.vars.join(', ') : '(all variables eligible)';
+    return `- ${x.name}: selected variables=${vars}; available columns=${allCols}`;
+  }).join('\n');
+}
+
 function looksLikeFollowUp(text) {
   return /(더\s*(자세|상세|많이|깊게)|자세한|상세한|추가|진단|해석|보고서|좀\s*더|more detailed|more detail|expand|deeper|diagnostic|explain more|full result)/i.test(text || '');
 }
@@ -654,15 +682,28 @@ async function callLLM(messages, jsonMode) {
   if (typeof cached === 'number') console.debug('[Vibestats] cached prompt tokens:', cached, 'usage:', data.usage);
   return data?.choices?.[0]?.message?.content ?? data?.content ?? data?.message ?? '';
 }
-async function parseNL(text, lastContext=null) {
+async function parseNL(text, lastContext=null, selectedScope=[]) {
   text = text.trim(); if (!text) throw new Error('Empty input');
   const schema = await getSchema();
   const contextText = formatLastContext(lastContext);
+  const selectedText = formatSelectedScope(selectedScope, schema);
   const followHint = looksLikeFollowUp(text) && lastContext
     ? '\nNote: this looks like a follow-up; reuse the previous context and extend it rather than repeating identical code.'
     : '';
   // System message is a FIXED prefix (cacheable). Variable parts go in the user message.
-  const userMsg = `Current datasets:\n${formatSchema(schema)}\n\nPrevious analysis context:\n${contextText}${followHint}\n\nUser input: ${text}\nJSON:`;
+  const userMsg = `Current datasets:
+${formatSchema(schema)}
+
+Selected analysis scope:
+${selectedText}
+
+Scope rule: if Selected analysis scope is not '(none)', prioritize those datasets. If variables are listed, use only those variables unless the user clearly asks otherwise. If a selected dataset says '(all variables eligible)', all variables in that dataset may be used.
+
+Previous analysis context:
+${contextText}${followHint}
+
+User input: ${text}
+JSON:`;
   const raw = await callLLM([
     { role:'system', content: SYSTEM_PROMPT },
     { role:'user', content: userMsg }
@@ -1270,6 +1311,9 @@ function App() {
   const [activeId, setActiveId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectedDatasets, setSelectedDatasets] = useState([]);
+  const [analysisScope, setAnalysisScope] = useState([]);
+  const [scopeOpen, setScopeOpen] = useState(null);
+  const [scopeDragOver, setScopeDragOver] = useState(false);
   const [selectionBox, setSelectionBox] = useState(null);
   const [progress, setProgress] = useState(null);
   const [openMenu, setOpenMenu] = useState(null);
@@ -1289,6 +1333,38 @@ function App() {
   function toggleTheme() { setThemeMode(m => m === 'light' ? 'dark' : 'light'); }
   function increaseFont() { setFontScale(v => Math.min(1.45, Math.round((v + 0.08) * 100) / 100)); }
   function resetFont() { setFontScale(1); }
+
+  useEffect(() => {
+    setAnalysisScope(scope => scope.filter(x => schema[x.name]).map(x => {
+      const cols = (schema[x.name]?.columns || []);
+      return { ...x, vars: (x.vars || []).filter(v => cols.includes(v)) };
+    }));
+  }, [schema]);
+
+  function addScopeDataset(name) {
+    if (!name || !schema[name]) return;
+    setAnalysisScope(scope => scope.some(x => x.name === name) ? scope : [...scope, { name, vars: [] }]);
+    setScopeOpen(name);
+  }
+  function removeScopeDataset(name) {
+    setAnalysisScope(scope => scope.filter(x => x.name !== name));
+    setScopeOpen(open => open === name ? null : open);
+  }
+  function toggleScopeVar(name, varName) {
+    setAnalysisScope(scope => scope.map(x => {
+      if (x.name !== name) return x;
+      const vars = x.vars || [];
+      return { ...x, vars: vars.includes(varName) ? vars.filter(v => v !== varName) : [...vars, varName] };
+    }));
+  }
+  function clearScopeVars(name) {
+    setAnalysisScope(scope => scope.map(x => x.name === name ? { ...x, vars: [] } : x));
+  }
+  function onScopeDrop(e) {
+    e.preventDefault(); e.stopPropagation(); setScopeDragOver(false);
+    const name = e.dataTransfer.getData('text/vibestats-dataset') || e.dataTransfer.getData('text/plain');
+    addScopeDataset(name);
+  }
 
   function pushResult(en) { setResultEntries(es => [...es, { id:++entryCounter, ...en }]); }
   function pushLog(en) { setResultEntries(es => [...es, { id:++entryCounter, system:true, ...en }]); }
@@ -1401,7 +1477,7 @@ function App() {
   async function onInterpretPrompt() {
     const text = promptRef.current.value.trim(); if (!text) return;
     setBusy(true); setParseErr(''); showProgress('Generating R code…', 35, '데이터 값은 보내지 않고 데이터셋/컬럼 구조만 사용합니다.');
-    try { const a = await parseNL(text, lastRunContext); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||''); }
+    try { const a = await parseNL(text, lastRunContext, analysisScope); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||''); }
     catch(e){ setParseErr(e.message||String(e)); }
     hideProgress(); setBusy(false);
   }
@@ -1863,6 +1939,7 @@ function App() {
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt → R Code', h('span',{className:'grow'})),
           h('div', { className:'content', style:{overflow:'auto'} },
             h('div', { className:'nl-box' },
+              h(ScopeZone, { scope:analysisScope, schema, openName:scopeOpen, setOpenName:setScopeOpen, removeDataset:removeScopeDataset, toggleVar:toggleScopeVar, clearVars:clearScopeVars, dragOver:scopeDragOver, setDragOver:setScopeDragOver, onDrop:onScopeDrop }),
               h('div', { className:'nl-row' },
                 h('input', { className:'nl-input', ref:promptRef, placeholder:'Enter prompt',
                   onKeyDown:e=>{ if(e.key==='Enter') onInterpretPrompt(); } }),
@@ -2076,13 +2153,43 @@ function blockSquare(b, activeId, selectedIds, fns) {
       h('div',{className:'bbtn',title:'rerun',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.rerun(b.id)},'↻'),
       h('div',{className:'bbtn',title:'info',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.showBlockInfo(b.id)},'ⓘ')));
 }
+
+function ScopeZone({ scope, schema, openName, setOpenName, removeDataset, toggleVar, clearVars, dragOver, setDragOver, onDrop }) {
+  const selected = scope || [];
+  return h('div', {
+      className:'scope-zone' + (dragOver ? ' dragover' : ''),
+      onDragOver:e=>{ e.preventDefault(); setDragOver(true); e.dataTransfer.dropEffect='copy'; },
+      onDragLeave:e=>{ if (e.currentTarget === e.target) setDragOver(false); },
+      onDrop
+    },
+    selected.length ? selected.map(item => {
+      const ds = schema[item.name] || {};
+      const cols = ds.columns || [];
+      const vars = item.vars || [];
+      const open = openName === item.name;
+      return h('div', { key:item.name, className:'scope-chip', title:'Click to select variables', onClick:e=>{ e.stopPropagation(); setOpenName(open ? null : item.name); } },
+        h('span', { className:'scope-name' }, item.name),
+        h('span', { className:'scope-count' }, vars.length ? vars.length + '/' + cols.length : 'all'),
+        h('button', { className:'scope-x', title:'Remove dataset', onClick:e=>{ e.stopPropagation(); removeDataset(item.name); } }, '×'),
+        open && h('div', { className:'var-pop', onClick:e=>e.stopPropagation() },
+          h('div', { className:'var-pop-head' },
+            h('b', null, item.name),
+            h('span', null, vars.length ? `${vars.length} selected` : 'all variables'),
+            h('button', { onClick:()=>clearVars(item.name), title:'Clear variable selection; all variables become eligible' }, 'All vars')),
+          h('div', { className:'var-list' },
+            cols.length ? cols.map(c => h('button', { key:c, className:'var-pill'+(vars.includes(c)?' on':''), onClick:()=>toggleVar(item.name, c) }, c))
+              : h('span', { className:'scope-empty' }, 'No columns found'))))
+    }) : h('span', { className:'scope-empty' }, 'Drag datasets here to focus the prompt. Click a dataset chip to choose variables.'));
+}
+
 function dsItem(n, info, kind, selected, fns) {
   const clickOpen = (e) => {
     if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); fns.setSelectedDatasets(ds=>ds.includes(n)?ds.filter(x=>x!==n):[...ds,n]); return; }
     fns.setSelectedDatasets([]); fns.showPreview(n);
   };
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  return h('div', { key:n, 'data-name':n, className:'ds-item kind-'+(kind || 'uploaded')+(selected?' selected':''),
+  return h('div', { key:n, 'data-name':n, className:'ds-item kind-'+(kind || 'uploaded')+(selected?' selected':''), draggable:true,
+    onDragStart:e=>{ e.dataTransfer.setData('text/vibestats-dataset', n); e.dataTransfer.setData('text/plain', n); e.dataTransfer.effectAllowed='copy'; },
     onClick:clickOpen,
     onContextMenu:e=>{ e.preventDefault(); if (selected) fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { fns.setSelectedDatasets([]); fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm', title:n}, n),
