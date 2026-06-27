@@ -89,7 +89,7 @@
 
   .load-btn { margin: 9px 11px; font-family: var(--mono); font-size: 12px; background: var(--accent-dim); color: var(--ink); border: 1px solid var(--accent); border-radius: 5px; padding: 8px; cursor: pointer; text-align: center; }
   .load-btn:hover { background: var(--accent); color: var(--bg); font-weight: 600; }
-  .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 5px; align-content: start; }
+  .ds-list { overflow-y: auto; padding: 4px 9px 9px; flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; align-content: start; }
   .ds-item { font-family: var(--mono); font-size: 11px; padding: 6px 7px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 4px; cursor: pointer; }
   .ds-item:hover { border-color: var(--line-bright); background: var(--soft-hover); }
   .ds-item.new { border-left-color: var(--accent); }
@@ -235,9 +235,9 @@
   }
   .icon-btn:hover { color: var(--accent) !important; border-color: var(--accent) !important; transform: translateY(-1px); }
   .icon-btn.active { color: var(--accent) !important; border-color: var(--accent) !important; background: var(--accent-dim) !important; }
-  .ds-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:7px; margin:9px 10px 6px; }
+  .ds-toolbar { display:flex; align-items:center; justify-content:center; gap:7px; margin:9px 10px 6px; position:relative; }
   .ds-toolbar .load-btn { margin: 0; flex: 0 0 auto; min-width: 118px; max-width: 150px; border-radius: 999px; font-weight: 700; letter-spacing: .2px; padding-left:14px; padding-right:14px; }
-  .ds-tool-btn { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 11px; border: 1px solid var(--line-bright); background: linear-gradient(180deg, var(--panel-2), var(--panel)); color: var(--ink-dim); cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:15px; }
+  .ds-tool-btn { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 11px; border: 1px solid var(--line-bright); background: linear-gradient(180deg, var(--panel-2), var(--panel)); color: var(--ink-dim); cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:15px; position:absolute; right:0; top:0; }
   .ds-tool-btn:hover { color: var(--accent); border-color: var(--accent); transform: translateY(-1px); }
   .ds-item { position: relative; padding-bottom: 30px; }
   .ds-actions { position:absolute; left:6px; right:6px; bottom:5px; display:flex; gap:4px; opacity:.72; transition: opacity .15s; }
@@ -521,15 +521,16 @@ Output ONLY one JSON object, no prose:
 
 Environment:
 - Datasets live as variables in the run environment; refer to them by name, e.g. lm(y ~ x, data=mydata).
-- Create/filter/mutate/merge: assign the data.frame to a clear new name (filtered <- subset(mydata, x>0)); do not print rows.
+- Create/filter/mutate/merge: assign a new data.frame ONLY when the user clearly asks to create/save/filter/merge/transform a dataset. For ordinary statistical analysis, do not create new datasets.
 - Plots are auto-captured (use plot/hist/boxplot/pairs/plot(model)).
 - base/stats/utils ready. For gmm/plm/nlme/sandwich etc., library(pkg) at top (auto-installed).
 - Use only the real dataset/column names given; never invent names. Use the provided column TYPES: convert text-coded numbers with as.numeric(), dates with as.Date(); for price series prefer diff(log(x)).
 
 Output rules:
 - Put the answer in a variable named result, as a small named list or compact data.frame with clean names; round numbers sensibly.
-- A raw data.frame result is auto-saved as a dataset, not printed. For >100-row outputs, assign to a new dataset and summarize briefly; never dump rows.
-- Keep the DEFAULT analysis concise — just the essentials. A Details button exists for expansion, so do not pre-expand. Examples of "essentials":
+- Do not assign intermediate tables to the global environment. Use local variables for intermediate objects.
+- Do not create result datasets unless the user explicitly asks to save/create a dataset. Large outputs should be summarized in result rather than assigned as datasets.
+- Keep the DEFAULT analysis concise — just the essentials. An Expand button exists for light expansion, and Diagnostics exists for heavier checks, so do not pre-expand. Examples of "essentials":
   · regression: compact coefficient table + R², adjusted R², n, model p-value. No ANOVA/CI/diagnostics/plots unless asked.
   · group comparison: group means/counts + main test statistic + p-value.
   · correlation: coefficient + p-value + n (plot only if asked).
@@ -551,16 +552,33 @@ const DETAILS_CONTEXT_CHARS = 1800;      // details button context
 const INTERPRET_RESULT_CHARS = 2500;     // result text sent only when Interpret is clicked
 const MAX_LLM_CHARS = 30000;             // client-side guard for request size
 
-const DETAILS_SYSTEM_PROMPT = `You are Vibestats. Generate an expanded detailed follow-up R analysis from a previous result.
+const DETAILS_SYSTEM_PROMPT = `You are Vibestats. Generate a LIGHT expanded follow-up R analysis from a previous result.
 Return ONLY one JSON object, no prose:
-{"code":"<R code, \\n for newlines>","summary":"<short English summary>","formula":"<formula or empty string>"}
+{"code":"<R code, \n for newlines>","summary":"<short English summary>","formula":"<formula or empty string>"}
 Rules:
-- This prompt is used only after the user clicks Details, so provide a richer analysis.
-- Reuse the previous analysis idea and extend it with appropriate additional tables, diagnostics, confidence intervals, model checks, plots, or robustness checks when relevant.
+- This prompt is used after the user clicks Expand. It is NOT a full diagnostic report.
+- Add only the most useful 1-3 additional outputs.
+- For regression, prefer confidence intervals and a compact model-fit table only.
+- For group tests, add group counts/effect size only if useful.
+- For correlation, add n and a compact p-value table only if useful.
+- Do NOT create diagnostic plots, residual plots, ANOVA tables, robustness checks, or long reports unless explicitly requested.
 - Use only real dataset and column names from the provided schema.
-- Put useful output in result as a named list of clean tables/values.
-- Do not print large raw datasets.
+- Put useful output in result as a named list of clean compact tables/values.
+- Do not print large raw datasets or create new datasets.
 - Keep the code self-contained enough to run even if the previous model object is not available.`;
+
+const DIAGNOSTICS_SYSTEM_PROMPT = `You are Vibestats. Generate a focused diagnostic R analysis from a previous result.
+Return ONLY one JSON object, no prose:
+{"code":"<R code, \n for newlines>","summary":"<short English summary>","formula":"<formula or empty string>"}
+Rules:
+- This prompt is used only when the user clicks Diagnostics.
+- Provide diagnostic checks that are relevant to the previous analysis, not every possible test.
+- For regression, include a compact residual summary and at most one diagnostic plot unless strongly justified.
+- For time series, include stationarity/autocorrelation checks only when relevant.
+- Do not run robustness checks or alternative models unless clearly useful.
+- Use only real dataset and column names from the provided schema.
+- Put useful output in result as compact named tables/values.
+- Do not print large raw datasets or create new datasets.`;
 
 const REPAIR_SYSTEM_PROMPT = `You fix R code so it runs correctly in the WebR environment.
 Return ONLY JSON: {"code":"...","summary":"...","formula":"...","reason":"brief reason"}
@@ -568,7 +586,7 @@ Rules:
 - Use only real dataset and column names from the provided schema.
 - Keep the user's intent.
 - If the user is creating a dataset, assign it to a syntactic dataset name.
-- Put useful analysis output in result; raw data.frame result will be saved as a dataset automatically.`;
+- Put useful analysis output in result. Do not create result datasets unless the user explicitly asked to save/create one.`;
 
 const INTERPRET_SYSTEM_PROMPT = `아래 R 통계분석 결과를 통계 비전공자도 이해할 수 있게 한국어로 아주 쉽고 직관적으로 해석해 주세요.
 Rules:
@@ -666,6 +684,33 @@ async function parseDetailsRequest(entry) {
   return { code:String(d.code), summary:String(d.summary || 'Detailed follow-up analysis'), formula:String(d.formula || entry?._formula || '') };
 }
 
+async function parseDiagnosticsRequest(entry) {
+  const schema = await getSchema();
+  const userMsg = `Current datasets:
+${formatSchema(schema)}
+
+Previous analysis summary:
+${entry?._summary || '(none)'}
+
+Previous formula:
+${entry?._formula || '(none)'}
+
+Previous R code:
+${entry?._code || '(none)'}
+
+Previous visible result excerpt:
+${String((entry?.text || '') + '\n' + htmlToText(entry?.html || '')).slice(0, DETAILS_CONTEXT_CHARS)}
+
+JSON:`;
+  const raw = await callLLM([
+    { role:'system', content: DIAGNOSTICS_SYSTEM_PROMPT },
+    { role:'user', content: userMsg }
+  ], true);
+  let d; try { d = JSON.parse(raw); } catch(e){ throw new Error('Failed to parse diagnostics JSON response'); }
+  if (!d.code) throw new Error("Diagnostics response did not include code.");
+  return { code:String(d.code), summary:String(d.summary || 'Focused diagnostic analysis'), formula:String(d.formula || entry?._formula || '') };
+}
+
 async function repairRCode(code, summary, errorText, attempt) {
   const schema = await getSchema();
   const userMsg = `Current datasets:\n${formatSchema(schema)}\n\nOriginal task:\n${summary || '(not provided)'}\n\nCurrent R code:\n${code}\n\nError message:\n${errorText}\n\nAttempt number: ${attempt}/5\nJSON:`;
@@ -734,15 +779,14 @@ async function executeR(code) {
     }
     as.character(x)
   }
-  .save_df <- function(d, prefix="result_dataset") {
-    nm <- .next_name(prefix)
-    assign(nm, as.data.frame(d), envir=.env)
-    .savedNames <<- c(.savedNames, nm)
-    nm
+  .large_html <- function(d, title="Result") {
+    nr <- tryCatch(nrow(as.data.frame(d)), error=function(e) length(d))
+    nc <- tryCatch(ncol(as.data.frame(d)), error=function(e) 1L)
+    paste0("<section class='notice-card'><b>", .esc_html(title), "</b><br>Large result hidden: ", nr, " rows × ", nc, " columns. Use the Save button if you want to store this result as a dataset.</section>")
   }
   .table_html <- function(d, title="Result") {
     d <- as.data.frame(d, stringsAsFactors=FALSE, check.names=FALSE)
-    if (nrow(d) > 100L) { .save_df(d); return("") }
+    if (nrow(d) > 100L) return(.large_html(d, title))
     if (ncol(d) == 0L) return("")
     dd <- d
     for (j in seq_along(dd)) dd[[j]] <- .fmt(dd[[j]])
@@ -768,7 +812,7 @@ async function executeR(code) {
     if (is.data.frame(x)) return(.table_html(x, title))
     if (is.matrix(x) || is.table(x)) return(.table_html(as.data.frame(x), title))
     if (is.atomic(x) && length(x) > 1L && length(x) <= 100L) return(.table_html(data.frame(value=x, check.names=FALSE), title))
-    if (is.atomic(x) && length(x) > 100L) { .save_df(data.frame(value=as.vector(x), check.names=FALSE)); return("") }
+    if (is.atomic(x) && length(x) > 100L) return(.large_html(data.frame(value=as.vector(x), check.names=FALSE), title))
     if (is.list(x) && !inherits(x, "lm") && !inherits(x, "glm") && depth < 2L) {
       nms <- names(x); if (is.null(nms)) nms <- paste0("Item ", seq_along(x)); nms[nms==""] <- paste0("Item ", which(nms==""))
       parts <- character(0)
@@ -1174,7 +1218,7 @@ function useSplitter() {
   }, []);
 }
 
-function StreamPane({ entries, kind, onInterpret, onSaveResult, onDetails }) {
+function StreamPane({ entries, kind, onInterpret, onSaveResult, onDetails, onDiagnostics }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [entries.length]);
   if (!entries.length) return h('div', { className:'stream', ref },
@@ -1193,7 +1237,8 @@ function StreamPane({ entries, kind, onInterpret, onSaveResult, onDetails }) {
         h('div', { className:'entry-actions' },
           onInterpret && (en.interp ? h('div',{className:'interp'}, en.interp)
             : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? '해석 중…' : 'Interpret')),
-          onDetails && en._code && !en._isDetail && h('button', { className:'nl-go', onClick:()=>onDetails(en.id), disabled:!!en.detailing }, en.detailing ? 'Details…' : 'Details'),
+          onDetails && en._code && !en._isDetail && h('button', { className:'nl-go', onClick:()=>onDetails(en.id), disabled:!!en.detailing }, en.detailing ? 'Expand…' : 'Expand'),
+          onDiagnostics && en._code && !en._isDetail && h('button', { className:'nl-go', onClick:()=>onDiagnostics(en.id), disabled:!!en.diagnosing }, en.diagnosing ? 'Diagnostics…' : 'Diagnostics'),
           onSaveResult && en.resultKey && h('button', { className:'nl-go', onClick:()=>onSaveResult(en.id) }, 'Save')))));
 }
 
@@ -1420,7 +1465,6 @@ function App() {
     setActiveId(id);
     dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code, rr.formula || formula, false);
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
     if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
     if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
     hideProgress(); setBusy(false);
@@ -1433,8 +1477,7 @@ function App() {
       return;
     }
     if (res.savedDataset) {
-      markDatasetKind(res.savedDataset, 'result');
-      pushLog({ head: ts + ' — dataset saved', text:`Large/raw result with more than 100 rows was saved as dataset '${res.savedDataset}' and was not printed in Results.` });
+      pushLog({ head: ts + ' — large result', text:`A large result was kept in the Results card. Click Save if you want to store it as a dataset.` });
     }
     if (res.newDataset && res.newDataset !== res.savedDataset && !String(res.savedDataset || '').split(',').includes(res.newDataset)) {
       markDatasetKind(res.newDataset, 'created');
@@ -1493,18 +1536,37 @@ function App() {
     const en = resultEntries.find(e=>e.id===entryId);
     if (!en || !en._code) return;
     setResultEntries(es => es.map(e => e.id===entryId ? {...e, detailing:true} : e));
-    setBusy(true); setParseErr(''); showProgress('Generating detailed analysis code…', 35, 'Details 버튼을 누른 경우에만 추가 API 호출을 사용합니다.');
+    setBusy(true); setParseErr(''); showProgress('Generating expanded analysis code…', 35, 'Expand 버튼은 가벼운 추가 결과만 생성합니다.');
     try {
       const d = await parseDetailsRequest(en);
       setCodeText(d.code); setRestate(d.summary); setFormula(d.formula || '');
       const rr = await runCodeWithRepair(d.code, d.summary);
       await refreshSchema();
-      dispatchOutput(rr.res, `${d.summary || en._summary || 'Detailed analysis'} — Details`, rr.code, rr.formula || d.formula || en._formula || '', true);
-      if (rr.repaired && !rr.res.error) setParseErr('Details 분석 코드가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
+      dispatchOutput(rr.res, `${d.summary || en._summary || 'Expanded analysis'} — Expand`, rr.code, rr.formula || d.formula || en._formula || '', true);
+      if (rr.repaired && !rr.res.error) setParseErr('Expand 분석 코드가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
     } catch(e) {
       pushLog({ head:`[${now()}] details failed`, error:true, text:e.message||String(e) });
     }
     setResultEntries(es => es.map(e => e.id===entryId ? {...e, detailing:false} : e));
+    hideProgress(); setBusy(false);
+  }
+
+  async function onDiagnosticsResult(entryId) {
+    const en = resultEntries.find(e=>e.id===entryId);
+    if (!en || !en._code) return;
+    setResultEntries(es => es.map(e => e.id===entryId ? {...e, diagnosing:true} : e));
+    setBusy(true); setParseErr(''); showProgress('Generating diagnostic analysis code…', 35, 'Diagnostics는 필요한 진단만 골라서 실행합니다.');
+    try {
+      const d = await parseDiagnosticsRequest(en);
+      setCodeText(d.code); setRestate(d.summary); setFormula(d.formula || '');
+      const rr = await runCodeWithRepair(d.code, d.summary);
+      await refreshSchema();
+      dispatchOutput(rr.res, `${d.summary || en._summary || 'Diagnostic analysis'} — Diagnostics`, rr.code, rr.formula || d.formula || en._formula || '', true);
+      if (rr.repaired && !rr.res.error) setParseErr('Diagnostics 분석 코드가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 Enter code 창에 반영되었습니다.');
+    } catch(e) {
+      pushLog({ head:`[${now()}] diagnostics failed`, error:true, text:e.message||String(e) });
+    }
+    setResultEntries(es => es.map(e => e.id===entryId ? {...e, diagnosing:false} : e));
     hideProgress(); setBusy(false);
   }
 
@@ -1517,7 +1579,7 @@ function App() {
       const finalName = await saveStoredResultAsDataset(en.resultKey, name);
       await refreshSchema();
       setNewNames(p=>p.includes(finalName)?p:[...p,finalName]);
-      markDatasetKind(finalName, 'result');
+      markDatasetKind(finalName, 'created');
       pushLog({ head:`[${now()}] result saved`, text:`Result saved as dataset '${finalName}'.` });
     } catch(err) { pushLog({ head:`[${now()}] result save failed`, error:true, text:err.message||String(err) }); }
   }
@@ -1532,7 +1594,6 @@ function App() {
     setActiveId(id);
     dispatchOutput(rr.res, `#${b.index} ${rr.summary||b.summary||''} (rerun)`.trim(), rr.code, rr.formula || b.formula || formula, false);
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (!rr.res.error && rr.res.savedDataset) setNewNames(p=>p.includes(rr.res.savedDataset)?p:[...p,rr.res.savedDataset]);
     hideProgress();
   }
   function showBlockInfo(id){ const b=blocksRef.current.find(x=>x.id===id); if(b) setModal({ blockInfo:id, title:`#${b.index} block`, body:`${b.label?'Label: '+b.label+'\n\n':''}${b.userMemo?'User memo:\n'+b.userMemo+'\n\n':''}Prompt:\n${b.summary || '(none)'}\n\nFormula:\n${b.formula || '(none)'}\n\nCode:\n${b.code}` }); }
@@ -1775,7 +1836,7 @@ function App() {
     h('input', { ref:projRef, type:'file', accept:'.json', style:{display:'none'}, onChange:onImportProject }),
 
     h('div', { className:'hsplit workspace' },
-      h('div', { className:'vsplit', style:{flex:'0 0 230px'} },
+      h('div', { className:'vsplit', style:{flex:'0 0 280px'} },
         h('div', { className:'window', style:{flex:'1 1 auto'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Datasets', h('span',{className:'grow'}), h('button',{className:'tbtn', title:'Fullscreen datasets', onClick:()=>fullscreen('Datasets','datasets')},'⛶')),
           h('div', { className:'content' },
@@ -1796,7 +1857,7 @@ function App() {
             h('button',{className:'tbtn', title:'Clear', onClick:()=>setResultEntries([])},'🧹'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Results','result')},'⛶')),
           h('div', { className:'content' },
-            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSaveResult:onSaveResult, onDetails:onDetailsResult }))),
+            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSaveResult:onSaveResult, onDetails:onDetailsResult, onDiagnostics:onDiagnosticsResult }))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window', style:{flex:'0 0 270px'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt → R Code', h('span',{className:'grow'})),
@@ -1856,7 +1917,7 @@ function App() {
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
           : modal.productInfo ? h('div',{className:'mbody'}, h(ProductInfo))
-          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null, onDetails: modal.streamKind==='result'?onDetailsResult:null}))
+          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null, onDetails: modal.streamKind==='result'?onDetailsResult:null, onDiagnostics: modal.streamKind==='result'?onDiagnosticsResult:null}))
           : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
             h('div', { className:'ds-toolbar' },
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
