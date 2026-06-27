@@ -132,17 +132,17 @@
   .rowlabel-inline { flex: 0 0 84px; display: flex; align-items: center; }
   .rowlabel-inline input { width: 100%; font-family: var(--mono); font-size: 10px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; outline: none; }
   .rowlabel-inline input:focus { border-color: var(--accent); }
-  .blk { width: 1.5cm; height: 1.5cm; background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 6px; padding: 4px 5px; cursor: grab; display: flex; flex-direction: column; position: relative; user-select: none; transition: box-shadow .12s, transform .04s; }
+  .blk { width: 1.5cm; height: 1.5cm; background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 6px; padding: 4px 5px; cursor: grab; display: flex; flex-direction: column; justify-content: space-between; position: relative; user-select: none; transition: box-shadow .12s, transform .04s; }
   .blk.err { border-top-color: var(--red); }
   .blk.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .blk.selected { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(217,164,91,.55); }
   .blk.dragging { box-shadow: 0 10px 26px rgba(0,0,0,.55); z-index: 40; cursor: grabbing; }
   .blk .top { display: flex; align-items: center; }
-  .blk .idx { font-family: var(--mono); font-size: 9px; color: var(--blue); font-weight: 700; }
+  .blk .idx { font-family: var(--mono); font-size: 13px; color: var(--blue); font-weight: 800; line-height: 1; }
   .blk.err .idx { color: var(--red); }
   .blk .st { margin-left: auto; font-size: 10px; font-weight: 700; }
   .blk .st.ok { color: var(--green); } .blk .st.err { color: var(--red); } .blk .st.run { color: var(--amber); }
-  .blk .mini { font-family: var(--mono); font-size: 7px; color: var(--ink-faint); line-height: 1.15; margin-top: 1px; flex: 1; overflow: hidden; }
+  .blk .mini { display: none; }
   .blk .btns { display: flex; gap: 2px; }
   .blk .bbtn { flex: 1; font-family: var(--mono); font-size: 9px; background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line); border-radius: 3px; padding: 1px 0; cursor: pointer; text-align: center; }
   .blk .bbtn:hover { color: var(--ink); border-color: var(--accent); }
@@ -270,7 +270,8 @@
   .nl-input, .interp-box .formula, .modal h3 { --base-px: 13px; }
   .ds-item, .code-wrap textarea, .code-btns button, .parse-err, .progress-card .pmsg, .entry-actions button { --base-px: 11px; }
   .ds-item .dim, .ds-empty, .rowlabel-inline input, .blk .st, .entry .ehead, .progress-card .pnote { --base-px: 10px; }
-  .blk .idx, .blk .bbtn { --base-px: 9px; }
+  .blk .bbtn { --base-px: 9px; }
+  .blk .idx { --base-px: 13px; }
   .blk .mini { --base-px: 7px; }
   .entry .interp { background: color-mix(in srgb, var(--green) 12%, var(--panel)); border-color: color-mix(in srgb, var(--green) 35%, var(--line)); }
   body.light .modal-bg { background: rgba(50, 63, 82, .28); }
@@ -409,6 +410,21 @@
   .block-editor textarea, .block-editor input { width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line-bright); border-radius:8px; padding:9px 11px; font-family:var(--mono); outline:none; }
   .block-editor textarea { min-height:80px; resize:vertical; white-space:pre; }
   .block-editor .code-edit { flex:1; min-height:180px; }
+
+
+
+  .product-info { max-width:720px; margin:0 auto; color:var(--ink); font-family:var(--sans); }
+  .product-info .prod-title { text-align:center; font-size:24px; font-weight:800; color:var(--accent); margin:6px 0 2px; }
+  .product-info .prod-sub { text-align:center; color:var(--blue); font-size:15px; margin-bottom:10px; }
+  .product-info .prod-ver { text-align:center; color:var(--ink-dim); font-size:14px; margin-bottom:12px; }
+  .product-info .prod-stack { text-align:center; color:var(--ink-faint); font-size:12px; margin-bottom:18px; }
+  .product-info .prod-note { border:1px solid var(--line-bright); background:color-mix(in srgb, var(--panel-2) 65%, var(--bg)); border-radius:8px; padding:13px 15px; line-height:1.6; margin-bottom:18px; }
+  .product-info h4 { color:var(--ink-dim); margin:14px 0 8px; font-size:13px; }
+  .product-info table { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; }
+  .product-info th, .product-info td { border-bottom:1px solid var(--line); padding:7px 8px; vertical-align:top; }
+  .product-info th { color:var(--ink-dim); font-weight:800; text-align:left; }
+  .product-info td:last-child, .product-info th:last-child { text-align:right; color:var(--ink-dim); }
+  .product-info .prod-foot { text-align:center; color:var(--ink-faint); font-size:11px; margin-top:18px; line-height:1.5; }
 
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
@@ -692,8 +708,13 @@ async function executeR(code) {
     x
   }
   .fmt <- function(x) {
+    if (inherits(x, "Date")) return(format(x, "%Y-%m-%d"))
+    if (inherits(x, "POSIXt")) {
+      y <- format(x, "%Y-%m-%d %H:%M:%S", tz="UTC")
+      y <- sub(" 00:00:00$", "", y)
+      return(y)
+    }
     if (is.numeric(x)) return(ifelse(is.na(x), "", format(round(x, 6), trim=TRUE, scientific=FALSE)))
-    if (inherits(x, "Date") || inherits(x, "POSIXt")) return(as.character(x))
     as.character(x)
   }
   .save_df <- function(d, prefix="result_dataset") {
@@ -858,12 +879,37 @@ async function previewHTML(name, startRow=1, endRow=10000) {
     if (is.null(d)) return("")
     nr <- nrow(d); start <- max(1L, min(${startRow}L, nr)); end <- max(start, min(${endRow}L, nr))
     d <- d[start:end, , drop=FALSE]
-    esc <- function(x) gsub("<","&lt;", gsub("&","&amp;", as.character(x)))
-    th <- paste0("<th>", c("row", esc(names(d))), "</th>", collapse="")
+    esc <- function(x) {
+      x <- as.character(x); x[is.na(x)] <- ""
+      x <- gsub("&", "&amp;", x, fixed=TRUE)
+      x <- gsub("<", "&lt;", x, fixed=TRUE)
+      x <- gsub(">", "&gt;", x, fixed=TRUE)
+      x
+    }
+    fmt <- function(x, nm="") {
+      if (inherits(x, "Date")) return(format(x, "%Y-%m-%d"))
+      if (inherits(x, "POSIXt")) {
+        y <- format(x, "%Y-%m-%d %H:%M:%S", tz="UTC")
+        y <- sub(" 00:00:00$", "", y)
+        return(y)
+      }
+      if (is.numeric(x)) {
+        ux <- unique(stats::na.omit(x))
+        if (grepl("date|time|datetime|timestamp", nm, ignore.case=TRUE) && length(ux) > 0 && all(is.finite(ux)) && all(ux >= 946684800) && all(ux <= 4102444800) && all(abs(ux - round(ux)) < .Machine$double.eps^0.5)) {
+          y <- format(as.POSIXct(x, origin="1970-01-01", tz="UTC"), "%Y-%m-%d %H:%M:%S", tz="UTC")
+          y <- sub(" 00:00:00$", "", y)
+          y[is.na(x)] <- ""
+          return(y)
+        }
+      }
+      as.character(x)
+    }
+    dd <- as.data.frame(Map(function(x, nm) fmt(x, nm), d, names(d)), stringsAsFactors=FALSE, check.names=FALSE)
+    th <- paste0("<th>", c("row", esc(names(dd))), "</th>", collapse="")
     rows <- character(0)
-    if (nrow(d) > 0) {
-      rows <- vapply(seq_len(nrow(d)), function(i) {
-        vals <- c(start + i - 1L, esc(d[i, , drop=TRUE]))
+    if (nrow(dd) > 0) {
+      rows <- vapply(seq_len(nrow(dd)), function(i) {
+        vals <- c(start + i - 1L, vapply(dd[i, , drop=FALSE], function(z) esc(z[[1]]), character(1)))
         paste0("<tr>", paste0("<td>", vals, "</td>", collapse=""), "</tr>")
       }, character(1))
     }
@@ -884,7 +930,26 @@ async function datasetToTSV(name, maxRows=1000) {
     d <- get(${JSON.stringify(name)}, envir=.nlstat_env)
     if (!is.data.frame(d)) d <- as.data.frame(d)
     if (nrow(d) > ${parseInt(maxRows,10)}) d <- d[seq_len(${parseInt(maxRows,10)}), , drop=FALSE]
-    paste(capture.output(write.table(d, stdout(), sep="\t", row.names=FALSE, quote=FALSE, na="")), collapse="\n")
+    fmt <- function(x, nm="") {
+      if (inherits(x, "Date")) return(format(x, "%Y-%m-%d"))
+      if (inherits(x, "POSIXt")) {
+        y <- format(x, "%Y-%m-%d %H:%M:%S", tz="UTC")
+        y <- sub(" 00:00:00$", "", y)
+        return(y)
+      }
+      if (is.numeric(x)) {
+        ux <- unique(stats::na.omit(x))
+        if (grepl("date|time|datetime|timestamp", nm, ignore.case=TRUE) && length(ux) > 0 && all(is.finite(ux)) && all(ux >= 946684800) && all(ux <= 4102444800) && all(abs(ux - round(ux)) < .Machine$double.eps^0.5)) {
+          y <- format(as.POSIXct(x, origin="1970-01-01", tz="UTC"), "%Y-%m-%d %H:%M:%S", tz="UTC")
+          y <- sub(" 00:00:00$", "", y)
+          y[is.na(x)] <- ""
+          return(y)
+        }
+      }
+      as.character(x)
+    }
+    dd <- as.data.frame(Map(function(x, nm) fmt(x, nm), d, names(d)), stringsAsFactors=FALSE, check.names=FALSE)
+    paste(capture.output(write.table(dd, stdout(), sep="\t", row.names=FALSE, quote=FALSE, na="")), collapse="\n")
   })`;
   return await webR.evalRString(code);
 }
@@ -1654,12 +1719,16 @@ function App() {
         { label:'Save blocks as R code… (.R)', onClick:exportRCode },
         { label:'Save All Datasets To Folder… (.csv)', onClick:saveAllDatasets },
       ]}),
+      h(MenuComp, { id:'help', label:'Help', openId:openMenu, setOpenId:setOpenMenu, items:[
+        { label:'Product Info / Open-source licenses', onClick:()=>setModal({ productInfo:true, title:'Product Info', full:false }) },
+      ]}),
       h('div', { className:'spacer' }),
       h('div', { className:'right' },
         h('div', { className:'top-tools' },
           h('button', { className:'icon-btn'+(themeMode==='light'?' active':''), title: themeMode==='light'?'Switch to night mode':'Switch to day mode', onClick:toggleTheme }, themeMode==='light'?'☀ Day':'☾ Night'),
           h('button', { className:'icon-btn', title:'Increase text size', onClick:increaseFont }, 'A＋'),
-          h('button', { className:'icon-btn', title:'Reset text size', onClick:resetFont }, 'A')),
+          h('button', { className:'icon-btn', title:'Reset text size', onClick:resetFont }, 'A'),
+          h('button', { className:'icon-btn', title:'Product info / licenses', onClick:()=>setModal({ productInfo:true, title:'Product Info', full:false }) }, 'ⓘ')),
         h('span', { className:'logo' }, 'Vibe', h('b',null,'stats'), ' · ', h('span',{className:'r'},'WebR')))),
 
     h('input', { ref:fileRef, type:'file', accept:'.csv,.tsv,.dta,.sav,.por,.sas7bdat,.xpt,.xls,.xlsx,.rds,.rdata,.rda', style:{display:'none'}, onChange:onFile }),
@@ -1746,6 +1815,7 @@ function App() {
               h('textarea',{className:'code-edit', value:modal.code || '', spellCheck:false, onChange:e=>setModal(m=>({...m,code:e.target.value}))}),
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
+          : modal.productInfo ? h('div',{className:'mbody'}, h(ProductInfo))
           : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSaveResult: modal.streamKind==='result'?onSaveResult:null, onDetails: modal.streamKind==='result'?onDetailsResult:null}))
           : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
             h('div', { className:'ds-toolbar' },
@@ -1787,6 +1857,34 @@ function App() {
           ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }},`Delete ${selectedIds.length} blocks`) ]
           : [ h('div',{key:1,className:'item danger', onClick:()=>{ if (selectedIds.length > 1 && selectedIds.includes(ctx.id)) deleteSelectedBlocks(); else deleteBlock(ctx.id); setCtx(null); }}, selectedIds.length > 1 && selectedIds.includes(ctx.id) ? `Delete ${selectedIds.length} blocks` : 'Delete block') ])
   );
+}
+
+
+function ProductInfo() {
+  const rows = [
+    ['React', 'UI library', 'MIT'],
+    ['ReactDOM', 'React DOM renderer', 'MIT'],
+    ['WebR / r-wasm', 'R compiled to WebAssembly for browser-side statistics', 'GPL-3 for distribution binaries; MIT for other repository software unless stated'],
+    ['R runtime', 'Statistical computing engine', 'GPL-2 / GPL-3 family'],
+    ['readxl', 'Excel import support, loaded when needed', 'MIT + LICENSE'],
+    ['haven', 'Stata / SPSS / SAS import support, loaded when needed', 'MIT'],
+    ['Google tag', 'Google Analytics 4 measurement script', 'Google terms'],
+    ['OpenAI API proxy', 'Natural-language-to-R code generation', 'OpenAI/service terms']
+  ];
+  return h('div', {className:'product-info'},
+    h('div', {className:'prod-title'}, 'Vibestats'),
+    h('div', {className:'prod-sub'}, 'Natural-language statistical analysis with WebR'),
+    h('div', {className:'prod-ver'}, 'Version 0.1.0'),
+    h('div', {className:'prod-stack'}, 'React + WebAssembly + WebR + R'),
+    h('div', {className:'prod-note'},
+      'This product runs R directly in the browser using WebR. It can import common statistical data files, generate R code from natural language, execute analyses locally in the browser, and keep datasets/blocks inside a saved project file.'),
+    h('h4', null, 'Open-source / service notices'),
+    h('table', null,
+      h('thead', null, h('tr', null, h('th', null, 'Component'), h('th', null, 'Purpose'), h('th', null, 'License / Notice'))),
+      h('tbody', null, rows.map((r,i)=>h('tr',{key:i}, h('td',null,r[0]), h('td',null,r[1]), h('td',null,r[2]))))),
+    h('div', {className:'prod-foot'},
+      'Only core components used by this single-file build are summarized here. R packages installed dynamically for a user analysis may have their own licenses. Before public or commercial release, verify upstream license files and keep a THIRD_PARTY_LICENSES file with full notices.',
+      h('br'), '© 2026 Vibestats'));
 }
 
 
@@ -1870,7 +1968,6 @@ function blockSquare(b, activeId, selectedIds, fns) {
     onContextMenu:e=>{ e.preventDefault(); fns.setCtx({x:e.clientX,y:e.clientY,kind:'block',id:b.id}); } },
     h('div',{className:'top'}, h('span',{className:'idx'},'#'+b.index),
       h('span',{className:'st '+(b.status==='run'?'run':b.status==='ok'?'ok':'err')}, b.status==='run'?'…':b.status==='ok'?'✓':'✗')),
-    h('div',{className:'mini'}, (b.summary||'').slice(0,22)),
     h('div',{className:'btns'},
       h('div',{className:'bbtn',title:'rerun',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.rerun(b.id)},'↻'),
       h('div',{className:'bbtn',title:'info',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.showBlockInfo(b.id)},'ⓘ')));
@@ -1885,9 +1982,8 @@ function dsItem(n, info, kind, selected, fns) {
     onClick:clickOpen,
     onContextMenu:e=>{ e.preventDefault(); if (selected) fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { fns.setSelectedDatasets([]); fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm', title:n}, n),
-    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]} · ${kind || 'uploaded'}`),
+    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}`),
     h('div',{className:'ds-actions'},
-      h('button',{className:'ds-ico', title:'Preview', onMouseDown:stop, onClick:e=>{stop(e); fns.showPreview(n);}}, '👁'),
       h('button',{className:'ds-ico note-btn', title:'Memo', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetNote(n);}}, (fns.datasetNotes && fns.datasetNotes[n]) ? '📝' : '✎'),
       h('button',{className:'ds-ico', title:'Save CSV', onMouseDown:stop, onClick:e=>{stop(e); fns.onSaveDataset(n);}}, '⇩'),
       h('button',{className:'ds-ico', title:'Delete', onMouseDown:stop, onClick:e=>{stop(e); if(confirm(`Delete '${n}'?`)) fns.onDeleteDataset(n);}}, '×')));
