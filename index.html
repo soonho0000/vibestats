@@ -113,6 +113,12 @@
   .interp-box { background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 5px; padding: 9px 11px; font-size: 12px; color: var(--ink-dim); line-height: 1.5; }
   .interp-box .restate { color: var(--ink); }
   .interp-box .formula { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--line); font-family: var(--mono); font-size: 13px; color: var(--amber); white-space: pre-wrap; }
+  .coach-box { background: color-mix(in srgb, var(--amber) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--amber) 42%, var(--line)); border-left: 3px solid var(--amber); border-radius: 8px; padding: 9px 11px; color: var(--ink); line-height: 1.5; }
+  .coach-box .coach-title { font-family: var(--mono); font-size: 11px; color: var(--amber); font-weight: 800; margin-bottom: 5px; }
+  .coach-box .coach-msg { font-family: var(--sans); font-size: 12px; }
+  .coach-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .coach-options button { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-bright); border-radius: 999px; background: var(--panel-2); color: var(--ink); padding: 5px 9px; cursor: pointer; }
+  .coach-options button:hover { border-color: var(--accent); color: var(--accent); }
   .scope-zone { position: relative; min-height: 42px; border: 1px dashed var(--line-bright); border-radius: 9px; background: color-mix(in srgb, var(--panel-2) 55%, var(--bg)); padding: 7px 9px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
   .scope-zone.dragover { border-color: var(--accent); background: var(--accent-dim); }
   .scope-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 10px; }
@@ -278,7 +284,7 @@
   .modal h3, .modal .mbody, .modal .mfoot button,
   .ctx .item, .entry-actions button,
   .progress-card, .progress-card .ptitle, .progress-card .pmsg, .progress-card .pnote,
-  .result-pre, .icon-btn, .ds-tool-btn, .ds-ico, .scope-zone, .scope-chip, .var-pop, .var-pill {
+  .result-pre, .icon-btn, .ds-tool-btn, .ds-ico, .scope-zone, .scope-chip, .var-pop, .var-pill, .coach-box, .coach-options button {
     font-size: calc(var(--base-px, 12px) * var(--font-scale)) !important;
   }
   .menu > .mtitle, .menu .ditem, .menubar .right .logo { --base-px: 12px; }
@@ -533,9 +539,12 @@ async function getSchema() {
 const OPENAI_MODEL = 'gpt-5.4-mini';
 const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
 
-const SYSTEM_PROMPT = `You are Vibestats, a natural-language-to-R statistical analysis planner.
-Output ONLY one JSON object, no prose:
-{"code":"<R code, \\n for newlines>","summary":"<one-line English restatement>","formula":"<model as a plain-text math formula, or empty string>"}
+const SYSTEM_PROMPT = `You are Vibestats, a natural-language-to-R statistical analysis coach and R code planner.
+Output ONLY one JSON object, no prose.
+If the request is sufficiently clear, return:
+{"status":"ready","code":"<R code, \n for newlines>","summary":"<one-line English restatement>","formula":"<model as a plain-text math formula, or empty string>"}
+If essential information is missing or the method is statistically under-specified, return:
+{"status":"needs_clarification","message":"<brief coaching message in the user's language>","options":["<short option 1>","<short option 2>","<short option 3>"],"summary":"<what is missing>"}
 
 Environment:
 - Datasets live as variables in the run environment; refer to them by name, e.g. lm(y ~ x, data=mydata).
@@ -555,13 +564,15 @@ Output rules:
   · group comparison: group means/counts + main test statistic + p-value.
   · correlation: coefficient + p-value + n (plot only if asked).
   · summary stats: n, missing, mean, sd, min, median, max for numeric columns.
-- Follow-up intent: if the input asks to expand/explain a previous result (Korean: 더 자세히/상세한/추가/진단/해석/좀 더/깊게/보고서; English: more detailed/expand/deeper/diagnostics/explain more), reuse the previous context and extend it — do not repeat identical code.
+- Clarification/coaching rule: do not mechanically force code when a method requires missing information. Ask one short coaching question with 2-3 actionable options when essential information is missing.
+- Ask for clarification for cases like WLS/weighted regression without a weight variable, regression without a clear dependent variable, multiple plausible datasets with no dataset named, time-series models without a time/order variable when needed, or a requested method that is not appropriate for the available variable types.
+- Do NOT over-ask. If there is a safe standard default, generate code and state the assumption in the summary. The goal is usually at most 2-3 back-and-forth turns before code generation.
 
 Formula field: regression "y = β0 + β1·x1 + ε"; AR on returns "Δlog(P_t) = φ1·Δlog(P_{t-1}) + ε_t"; tests/correlation give the statistic/hypothesis; plain data manipulation "".
 
 Example:
 input:"regress y on x1 x2 in df"
-output:{"code":"m <- lm(y ~ x1 + x2, data=df)\\ns <- summary(m)\\nct <- as.data.frame(round(s$coefficients,4))\\nct$term <- rownames(ct); rownames(ct) <- NULL\\nnames(ct) <- c('estimate','std_error','t_value','p_value','term')\\nct <- ct[c('term','estimate','std_error','t_value','p_value')]\\nfit <- data.frame(r_squared=round(s$r.squared,4), adj_r_squared=round(s$adj.r.squared,4), n=nobs(m), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\\nresult <- list(coefficients=ct, model_fit=fit)","summary":"Concise OLS regression of y on x1 and x2 in df.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}`;
+output:{"status":"ready","code":"m <- lm(y ~ x1 + x2, data=df)\\ns <- summary(m)\\nct <- as.data.frame(round(s$coefficients,4))\\nct$term <- rownames(ct); rownames(ct) <- NULL\\nnames(ct) <- c('estimate','std_error','t_value','p_value','term')\\nct <- ct[c('term','estimate','std_error','t_value','p_value')]\\nfit <- data.frame(r_squared=round(s$r.squared,4), adj_r_squared=round(s$adj.r.squared,4), n=nobs(m), model_p_value=pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail=FALSE))\\nresult <- list(coefficients=ct, model_fit=fit)","summary":"Concise OLS regression of y on x1 and x2 in df.","formula":"y = β0 + β1·x1 + β2·x2 + ε"}`;
 
 // ===== Token / privacy controls =====
 // Keep the fixed system prompts at the front of API calls so provider-side prompt caching can reuse them.
@@ -729,7 +740,7 @@ async function callLLM(messages, jsonMode) {
   const content = data?.choices?.[0]?.message?.content ?? data?.output_text ?? data?.content ?? data?.message ?? '';
   return normalizeLLMContent(content);
 }
-async function parseNL(text, lastContext=null, selectedScope=[]) {
+async function parseNL(text, lastContext=null, selectedScope=[], clarificationContext=null) {
   text = text.trim(); if (!text) throw new Error('Empty input');
   const schema = await getSchema();
   const contextText = formatLastContext(lastContext);
@@ -746,6 +757,9 @@ ${selectedText}
 
 Scope rule: if Selected analysis scope is not '(none)', prioritize those datasets. If variables are listed, use only those variables unless the user clearly asks otherwise. If a selected dataset says '(all variables eligible)', all variables in that dataset may be used.
 
+Clarification context:
+${clarificationContext ? JSON.stringify(clarificationContext) : '(none)'}
+
 Previous analysis context:
 ${contextText}${followHint}
 
@@ -756,6 +770,10 @@ JSON:`;
     { role:'user', content: userMsg }
   ], true);
   const d = parseLLMJson(raw, 'LLM');
+  const status = String(d.status || 'ready');
+  if (status === 'needs_clarification') {
+    return { needsClarification:true, message:String(d.message || 'I need a bit more information before generating code.'), options:Array.isArray(d.options) ? d.options.map(String).slice(0,3) : [], summary:String(d.summary || '') };
+  }
   if (!d.code) throw new Error("Missing 'code' field");
   return { code:String(d.code), summary:String(d.summary || text), formula:String(d.formula || '') };
 }
@@ -1368,6 +1386,7 @@ function App() {
   const [resultEntries, setResultEntries] = useState([initialWelcome]);
   const [logEntries, setLogEntries] = useState([initialWelcome]);
   const [lastRunContext, setLastRunContext] = useState(null);
+  const [coach, setCoach] = useState(null);
   // ============================================================
 
   const [modal, setModal] = useState(null);
@@ -1544,9 +1563,25 @@ function App() {
   async function onInterpretPrompt() {
     const text = promptRef.current.value.trim(); if (!text) return;
     setBusy(true); setParseErr(''); showProgress('Generating R code…', 35, '데이터 값은 보내지 않고 데이터셋/컬럼 구조만 사용합니다.');
-    try { const a = await parseNL(text, lastRunContext, analysisScope); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||''); }
+    try {
+      const a = await parseNL(text, lastRunContext, [], coach);
+      if (a.needsClarification) {
+        setCoach({ message:a.message, options:a.options || [], original:text, summary:a.summary || '' });
+        setCodeText(''); setRestate(''); setFormula('');
+      } else {
+        setCoach(null); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||'');
+      }
+    }
     catch(e){ setParseErr(e.message||String(e)); }
     hideProgress(); setBusy(false);
+  }
+
+  function onCoachOption(option) {
+    const base = coach?.original || promptRef.current?.value || '';
+    const next = (base ? base + '\n' : '') + 'User clarification: ' + option;
+    if (promptRef.current) promptRef.current.value = next;
+    setCoach(null);
+    setTimeout(()=>onInterpretPrompt(), 0);
   }
 
   async function runCodeCore(code, allowNewDatasets=false) {
@@ -1849,6 +1884,7 @@ function App() {
     
     setActiveId(null);
     setLastRunContext(null);
+    setCoach(null);
   }
   function importProjectClick(){ projRef.current.click(); }
   async function onImportProject(e) {
@@ -2010,7 +2046,11 @@ function App() {
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt → R Code', h('span',{className:'grow'})),
           h('div', { className:'content', style:{overflow:'auto'} },
             h('div', { className:'nl-box' },
-              h(ScopeZone, { scope:analysisScope, schema, openName:scopeOpen, setOpenName:setScopeOpen, removeDataset:removeScopeDataset, toggleVar:toggleScopeVar, clearVars:clearScopeVars, dragOver:scopeDragOver, setDragOver:setScopeDragOver, onDrop:onScopeDrop }),
+              coach && h('div', { className:'coach-box' },
+                h('div', { className:'coach-title' }, 'Vibestats coach'),
+                h('div', { className:'coach-msg' }, coach.message),
+                coach.options && coach.options.length ? h('div', { className:'coach-options' },
+                  coach.options.map((op,i)=>h('button', { key:i, onClick:()=>onCoachOption(op) }, op))) : null),
               h('div', { className:'nl-row' },
                 h('input', { className:'nl-input', ref:promptRef, placeholder:'Enter prompt',
                   onKeyDown:e=>{ if(e.key==='Enter') onInterpretPrompt(); } }),
@@ -2260,8 +2300,7 @@ function dsItem(n, info, kind, selected, fns) {
     fns.setSelectedDatasets([]); fns.showPreview(n);
   };
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  return h('div', { key:n, 'data-name':n, className:'ds-item kind-'+(kind || 'uploaded')+(selected?' selected':''), draggable:true,
-    onDragStart:e=>{ e.dataTransfer.setData('text/vibestats-dataset', n); e.dataTransfer.setData('text/plain', n); e.dataTransfer.effectAllowed='copy'; },
+  return h('div', { key:n, 'data-name':n, className:'ds-item kind-'+(kind || 'uploaded')+(selected?' selected':''),
     onClick:clickOpen,
     onContextMenu:e=>{ e.preventDefault(); if (selected) fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { fns.setSelectedDatasets([]); fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm', title:n}, n),
