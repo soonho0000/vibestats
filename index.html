@@ -2016,6 +2016,24 @@ function App() {
     return /(create|save|store|new\s+dataset|make\s+dataset|filter|filtered|merge|join|append|bind|reshape|transform|mutate|subset|clean\s+dataset|derive\s+dataset|데이터셋\s*(생성|만들|저장)|새\s*데이터|필터|병합|합치|변환|가공|저장)/i.test(String(intentText || ''));
   }
 
+  function shouldAllowDirectRDatasetSave(code='') {
+    const txt = String(code || '');
+    if (!txt.trim()) return false;
+    const blocked = new Set(['result','m','s','ct','fit','model','tmp','temp','d','df','data','dat','summary_table','anova_table','coef_table']);
+    const lines = txt.split(/\r?\n/).map(x => x.replace(/#.*$/, '').trim()).filter(Boolean);
+    for (const line of lines) {
+      const m = line.match(/^([A-Za-z.][A-Za-z0-9._]*)\s*(?:<-|=)\s*(.+)$/);
+      if (!m) continue;
+      const name = m[1];
+      const rhs = m[2].trim();
+      if (name.startsWith('.') || blocked.has(name)) continue;
+      if (/^(data\.frame|as\.data\.frame|tibble::tibble|tibble|read\.|utils::read\.|subset|merge|transform|within|cbind|rbind)\s*\(/i.test(rhs)) return true;
+      if (/^[A-Za-z.][A-Za-z0-9._]*$/i.test(rhs)) return true;
+      if (/^datasets::[A-Za-z.][A-Za-z0-9._]*$/i.test(rhs)) return true;
+    }
+    return false;
+  }
+
 
   async function runGeneratedAsBlock(generatedCode, generatedSummary, generatedFormula='') {
     const code = String(generatedCode || '').trim();
@@ -2138,7 +2156,7 @@ ${currentCode}` });
     setBusy(true); setParseErr('');
     const baseIntent = (promptRef.current?.value || '') + '\n' + (restate || '');
     const intentText = baseIntent.trim() ? baseIntent : code;
-    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40), shouldAllowDatasetCreation(intentText));
+    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40), shouldAllowDatasetCreation(intentText) || shouldAllowDirectRDatasetSave(code));
     await refreshSchema();
     dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code, rr.formula || formula, false);
     if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
@@ -2153,7 +2171,7 @@ ${currentCode}` });
     setBusy(true); setParseErr('');
     const baseIntent = (promptRef.current?.value || '') + '\n' + (restate || '');
     const intentText = baseIntent.trim() ? baseIntent : code;
-    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40), shouldAllowDatasetCreation(intentText));
+    const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40), shouldAllowDatasetCreation(intentText) || shouldAllowDirectRDatasetSave(code));
     await refreshSchema();
     const status = rr.res.error ? 'err' : 'ok';
     const block = { id, index, summary:rr.summary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||'', status, label:'', newline:false, userMemo:'' };

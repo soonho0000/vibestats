@@ -42,13 +42,17 @@ Output rules:
 - If you create/filter/merge/transform a dataset because the user explicitly asked, assign exactly ONE final data.frame with a clear dataset name and set .vibestats_save_dataset to that exact name, e.g. returns_data <- data.frame(...); .vibestats_save_dataset <- "returns_data". Also set result to a compact summary with the new dataset name, row count, column count, and key variables.
 - Do not assign intermediate tables to the global environment. Use local variables for intermediate objects, or wrap intermediate work inside local({ ... }). Only the final requested dataset should be assigned as a named data.frame.
 - Do not create result datasets unless the user explicitly asks to save/create a dataset. Large outputs should be summarized in result rather than assigned as datasets.
-- Default statistical output should resemble what SPSS typically shows for the same analysis: structured tables with clear names, not long prose. Keep it compact but include the standard SPSS-like tables users expect. Examples:
-  · linear regression: Model Summary (R, R², adjusted R², residual SE, n), ANOVA/model test (df, F, p-value), and Coefficients (term, estimate, std_error, standardized_beta when practical, t, p_value).
-  · logistic regression: model fit summary, classification/accuracy if appropriate, coefficients with odds ratios and p-values when practical.
-  · group comparison/t-test: group statistics, test table with statistic, df, p-value, mean difference, and confidence interval when practical.
-  · ANOVA: descriptive/group table plus ANOVA table; add post-hoc only if asked.
-  · correlation: correlation matrix or pair table with coefficient, p-value, and n.
-  · summary stats/frequencies: n, missing, mean, sd, min, quartiles/median, max for numeric columns; counts/percentages for categorical columns.
+- Statistical output format is CRITICAL: make the visible result look like standard SPSS/Stata output, not like raw R console output and not like a prose report.
+- For inferential/statistical procedures, result MUST be a named list of compact, publication-style tables with clear names similar to SPSS/Stata. Use names such as "Model Summary", "ANOVA / Model Test", "Coefficients", "Group Statistics", "Independent Samples Test", "Correlations", "Descriptive Statistics", "Frequencies", and "Post Hoc Tests" when appropriate.
+- Do NOT set result to summary(model), print(model), capture.output(...), or a long paragraph. Convert important information into clean data.frames so the UI displays separate tables.
+- Every table should have clear column names, sensible rounding, n/df/statistic/p-value where relevant, and should be compact enough for a result card.
+- Required SPSS/Stata-like tables by method:
+  · linear regression: Model Summary (R, R_squared, adj_R_squared, residual_SE, n), ANOVA / Model Test (df_model, df_residual, F, p_value), and Coefficients (term, estimate, std_error, standardized_beta when practical, t_value, p_value).
+  · logistic/probit regression: Model Fit (n, logLik, AIC, pseudo_R2 when practical), Classification / Accuracy if appropriate, and Coefficients with odds ratios or marginal effects when practical.
+  · group comparison/t-test: Group Statistics plus Test table with statistic, df, p_value, mean_difference, confidence interval.
+  · ANOVA: Descriptive/group table plus ANOVA table; add post-hoc only if asked.
+  · correlation: Correlations table or matrix with coefficient, p_value, and n.
+  · summary stats/frequencies: Descriptive Statistics with n, missing, mean, sd, min, quartiles/median, max for numeric columns; Frequencies with counts and percentages for categorical columns.
 - Do not create diagnostic plots, residual plots, robustness checks, or long explanatory reports unless the user explicitly asks for them.
 - Clarification/coaching rule: do not mechanically force code when a method requires missing information. Ask one short coaching question with 2-3 actionable options when essential information is missing.
 - Ask for clarification for cases like WLS/weighted regression without a weight variable, regression without a clear dependent variable, multiple plausible datasets with no dataset named, time-series models without a time/order variable when needed, or a requested method that is not appropriate for the available variable types.
@@ -81,7 +85,7 @@ Rules:
 - Do NOT create diagnostic plots, residual plots, ANOVA tables, robustness checks, or long reports unless explicitly requested.
 - Use only real dataset and column names from the provided schema.
 - Every successful analysis must end with a non-empty result object. Never leave result NULL.
-- Put useful output in result as a named list of clean compact tables/values.
+- Put useful output in result as a named list of clean compact tables/values. Use SPSS/Stata-like table names and columns; never return raw summary(model) output.
 - Do not print large raw datasets or create new datasets.
 - Keep the code self-contained enough to run even if the previous model object is not available.`;
 
