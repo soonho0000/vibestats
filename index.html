@@ -453,7 +453,7 @@
   .rcode-pane { display:flex; flex-direction:column; height:100%; min-height:0; }
   .rcode-toolbar { flex:0 0 auto; display:none; }
   .rcode-toolbar .grow { flex:1; }
-  .rcode-run { min-width:28px; height:22px; padding:0 8px !important; border-radius:999px !important; font-size:12px !important; line-height:1; }
+  .rcode-run { min-width:28px; height:22px; padding:1px 6px !important; border-radius:3px !important; font-size:11px !important; line-height:1; }
   .rcode-full { display:none; }
   .rcode-textarea { flex:1; min-height:0; width:100%; resize:none; border:0; outline:none; border-radius:0; background:var(--bg); color:var(--ink); font-family:var(--mono); font-size:13px; line-height:1.5; padding:11px 12px; white-space:pre; overflow:auto; tab-size:2; }
   .rcode-textarea::placeholder { color:var(--ink-faint); }
@@ -463,8 +463,8 @@
   .orange-response-card .coach-options { margin-top:10px; }
   .entry-actions .save-pdf-btn { border-color: color-mix(in srgb, var(--amber) 55%, var(--line)) !important; color: var(--amber) !important; }
 
-  .titlebar .rcode-run.tbtn { color:var(--green) !important; border-color:color-mix(in srgb, var(--green) 45%, var(--line-bright)); background:linear-gradient(180deg, var(--panel-2), var(--panel)); font-size:12px; padding:1px 8px; }
-  .titlebar .rcode-run.tbtn:hover { color:var(--bg) !important; background:var(--green); border-color:var(--green); }
+  .titlebar .rcode-run.tbtn { color:var(--ink-faint) !important; border-color:var(--line-bright) !important; background:transparent !important; font-size:11px !important; padding:1px 6px !important; transform:none !important; }
+  .titlebar .rcode-run.tbtn:hover { color:var(--ink) !important; border-color:var(--accent) !important; background:transparent !important; transform:none !important; }
   .code-editor-shell { height:100%; width:100%; display:flex; flex-direction:column; background:var(--bg); }
   .code-editor-hint { flex:0 0 auto; padding:7px 12px; border-bottom:1px solid var(--line); color:var(--ink-faint); font-family:var(--mono); font-size:11px; background:color-mix(in srgb, var(--panel-2) 40%, var(--bg)); }
   .code-editor-hint b { color:var(--accent); }
@@ -912,7 +912,7 @@ async function executeR(code, allowNewDatasets=false) {
   .large_html <- function(d, title="Result") {
     nr <- tryCatch(nrow(as.data.frame(d)), error=function(e) length(d))
     nc <- tryCatch(ncol(as.data.frame(d)), error=function(e) 1L)
-    paste0("<section class='notice-card'><b>", .esc_html(title), "</b><br>Large result hidden: ", nr, " rows × ", nc, " columns. Use Save PDF if you want to export the visible results.</section>")
+    paste0("<section class='notice-card'><b>", .esc_html(title), "</b><br>Large result hidden: ", nr, " rows × ", nc, " columns. Use Pdf if you want to export the visible results.</section>")
   }
   .table_html <- function(d, title="Result") {
     d <- as.data.frame(d, stringsAsFactors=FALSE, check.names=FALSE)
@@ -955,11 +955,16 @@ async function executeR(code, allowNewDatasets=false) {
   if (!is.null(result)) {
     .printed <- capture.output(print(result))
     .lineCount <- length(.printed)
-    .resultHtml <- .obj_html(result, "Result")
-    if (!length(.savedNames)) {
-      assign(${JSON.stringify(resultKey)}, result, envir=.env)
-      .resultKey <- ${JSON.stringify(resultKey)}
+    .resultRows <- tryCatch(nrow(as.data.frame(result)), error=function(e) if (is.atomic(result)) length(result) else NA_integer_)
+    if (!is.na(.resultRows) && .resultRows > 100L) {
+      .df_save <- tryCatch(as.data.frame(result, stringsAsFactors=FALSE, check.names=FALSE), error=function(e) NULL)
+      if (!is.null(.df_save)) {
+        .nm <- .next_name("large_result")
+        assign(.nm, .df_save, envir=.env)
+        .savedNames <- c(.savedNames, .nm)
+      }
     }
+    .resultHtml <- .obj_html(result, "Result")
     if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
   }
   paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__SAVED__", paste(.savedNames, collapse=","), "__RKEY__", .resultKey)
@@ -998,22 +1003,20 @@ async function executeR(code, allowNewDatasets=false) {
     await getSchema();
     let after = Object.keys(window._dsCache||{});
     let newOnes = after.filter(n=>!before.has(n));
-    const removedNewOnes = newOnes.slice();
-    if (newOnes.length && !allowNewDatasets) {
+    const savedSet = new Set(String(savedDataset || '').split(',').map(x=>x.trim()).filter(Boolean));
+    const removedNewOnes = newOnes.filter(n => !savedSet.has(n));
+    if (removedNewOnes.length && !allowNewDatasets) {
       try {
-        await webR.evalRVoid(`rm(list=${JSON.stringify(newOnes)}, envir=.nlstat_env)`);
+        await webR.evalRVoid(`rm(list=${JSON.stringify(removedNewOnes)}, envir=.nlstat_env)`);
         await getSchema();
       } catch(e) {}
-      newOnes = [];
-      savedDataset = '';
+      newOnes = newOnes.filter(n => savedSet.has(n));
     }
     const hasDisplay = !!(resultHtml || (resultText && resultText.trim()) || (consoleText && consoleText.trim()) || plot);
     if (!hasDisplay) {
       const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-      const datasetNote = removedNewOnes.length && !allowNewDatasets
-        ? `<br><br>Temporary dataset output (${esc(removedNewOnes.join(', '))}) was not added to the Datasets panel because automatic result saving is off.`
-        : '';
-      resultHtml = `<section class="notice-card"><b>No displayable result</b><br>The code ran successfully, but it did not produce a displayable <code>result</code> object, console output, or plot.${datasetNote}<br><br>Tip: end the R code with a compact object such as <code>result &lt;- summary_table</code> or <code>result &lt;- list(...)</code>.</section>`;
+      const datasetNote = '';
+      resultHtml = `<section class="notice-card"><b>No displayable result</b>${datasetNote}</section>`;
     }
     return { resultText, resultHtml, consoleText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
   }
@@ -1320,26 +1323,85 @@ function resultsPrintableHtml(entries) {
   return chunks.join('\n') || '<p>No results to export.</p>';
 }
 
-async function saveElementAsPdf(element, defaultName='vibestats-result.pdf') {
-  const canvas = await renderElementToCanvas(element);
-  const pageW = 595.28, pageH = 841.89; // A4 points
-  const margin = 28;
-  const maxW = pageW - margin * 2;
-  const scale = maxW / canvas.width;
-  const pageCanvasH = Math.floor((pageH - margin * 2) / scale);
-  const slices = [];
-  for (let y = 0; y < canvas.height; y += pageCanvasH) {
-    const hgt = Math.min(pageCanvasH, canvas.height - y);
-    const slice = document.createElement('canvas');
-    slice.width = canvas.width;
-    slice.height = hgt;
-    const ctx = slice.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, slice.width, slice.height);
-    ctx.drawImage(canvas, 0, y, canvas.width, hgt, 0, 0, canvas.width, hgt);
-    slices.push({ dataUrl: slice.toDataURL('image/jpeg', 0.94), width: slice.width, height: slice.height });
+function pdfEscapeText(s) {
+  return String(s ?? '')
+    .normalize('NFKD')
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '?')
+    .replace(/[\\()]/g, '\\$&');
+}
+function extractEntryTextForPdf(element) {
+  const clone = element.cloneNode(true);
+  clone.querySelectorAll('.entry-actions, button, script, style').forEach(x => x.remove());
+  clone.querySelectorAll('table').forEach(tbl => {
+    const rows = Array.from(tbl.querySelectorAll('tr')).map(tr =>
+      Array.from(tr.querySelectorAll('th,td')).map(td => td.textContent.trim()).join('    ')
+    );
+    const pre = document.createElement('pre');
+    pre.textContent = rows.join('\n');
+    tbl.replaceWith(pre);
+  });
+  return (clone.innerText || clone.textContent || '').replace(/\n{3,}/g, '\n\n').trim() || 'No visible content.';
+}
+function wrapPdfLine(line, maxChars=92) {
+  const out = [];
+  let cur = String(line ?? '').replace(/\t/g, '    ');
+  while (cur.length > maxChars) {
+    let cut = cur.lastIndexOf(' ', maxChars);
+    if (cut < 35) cut = maxChars;
+    out.push(cur.slice(0, cut));
+    cur = cur.slice(cut).trimStart();
   }
-  const pdfBlob = buildImagePdf(slices, pageW, pageH, margin);
+  out.push(cur);
+  return out;
+}
+function buildTextPdfBlob(title, text) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const offsets = [0];
+  let len = 0;
+  const add = (x) => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (n, body) => { offsets[n] = len; add(`${n} 0 obj\n${body}\nendobj\n`); };
+  const pageW = 595.28, pageH = 841.89;
+  const marginX = 42, topY = 800, lineH = 13;
+  const rawLines = [title || 'Vibestats result', '', ...String(text || '').split(/\r?\n/)];
+  const lines = [];
+  for (const ln of rawLines) wrapPdfLine(ln).forEach(x => lines.push(x));
+  const linesPerPage = Math.max(1, Math.floor((topY - 45) / lineH));
+  const pages = [];
+  for (let i=0; i<lines.length; i += linesPerPage) pages.push(lines.slice(i, i+linesPerPage));
+  add('%PDF-1.4\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  const pageNums = [];
+  let objNum = 4;
+  const pageObjs = [];
+  for (const pageLines of pages) {
+    const contentObj = objNum++;
+    const pageObj = objNum++;
+    pageNums.push(pageObj);
+    let y = topY;
+    const cmds = ['BT', '/F1 10 Tf', '12 TL'];
+    for (const line of pageLines) {
+      cmds.push(`1 0 0 1 ${marginX} ${y.toFixed(2)} Tm (${pdfEscapeText(line)}) Tj`);
+      y -= lineH;
+    }
+    cmds.push('ET');
+    const stream = cmds.join('\n') + '\n';
+    pageObjs.push([contentObj, `<< /Length ${enc.encode(stream).length} >>\nstream\n${stream}endstream`]);
+    pageObjs.push([pageObj, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObj} 0 R >>`]);
+  }
+  obj(2, `<< /Type /Pages /Kids [${pageNums.map(n=>`${n} 0 R`).join(' ')}] /Count ${pageNums.length} >>`);
+  obj(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  for (const [n, body] of pageObjs) obj(n, body);
+  const xref = len;
+  add(`xref\n0 ${offsets.length}\n0000000000 65535 f \n`);
+  for (let i=1;i<offsets.length;i++) add(String(offsets[i]).padStart(10,'0') + ' 00000 n \n');
+  add(`trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+  return new Blob(parts, { type:'application/pdf' });
+}
+async function saveElementAsPdf(element, defaultName='vibestats-result.pdf') {
+  const title = element.querySelector('.ehead')?.textContent?.trim() || 'Vibestats result';
+  const text = extractEntryTextForPdf(element);
+  const pdfBlob = buildTextPdfBlob(title, text);
   await saveBlobFile(defaultName, 'application/pdf', pdfBlob);
 }
 function styleTextForExport() {
@@ -1532,7 +1594,7 @@ function StreamPane({ entries, kind, onInterpret, onSavePdf, onCoachOption }) {
         h('div', { className:'entry-actions' },
           onInterpret && !en.coach && (en.interp ? h('div',{className:'interp'}, en.interp)
             : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? '해석 중…' : 'Interpret')),
-          onSavePdf && !en.coach && h('button', { className:'nl-go save-pdf-btn', onClick:()=>onSavePdf(en.id) }, 'Save PDF')))));
+          onSavePdf && !en.coach && h('button', { className:'nl-go save-pdf-btn', onClick:()=>onSavePdf(en.id) }, 'Pdf')))));
 }
 
 function App() {
@@ -1551,7 +1613,7 @@ function App() {
   const initialWelcome = {
     id: 0,
     head: '[Guide] Welcome to Vibestats!',
-    text: "1. If you are a first-time user, follow these steps to get started. You may write your request in your native language. This tool runs R directly in your browser using WebR, so no local R installation is required.\n2. To download the example dataset, copy: sample_data <- mtcars\n   paste it into the R Code pane, and click the ▶ Run button.\n3. To see the summary statistics, type: 'Show me the summary statistics for sample_data'\n   in the 'Enter prompt' box and click 'Analyze'.\n4. Analyze runs the code immediately. Use the Rcode button if you only want to generate code first, then run it from the R Code pane.\n5. Click one or more datasets on the left to mark them as active, then enter a prompt such as 'regress mpg on hp and cyl'. If Vibestats needs one more detail, it will ask a short coaching question before generating R code."
+    text: "1. If you are a first-time user, follow these steps to get started. You may write your request in your native language. This tool runs R directly in your browser using WebR, so no local R installation is required.\n2. To download the example dataset, copy: sample_data <- mtcars\n   paste it into the R Code pane, and click the Run button.\n3. To see the summary statistics, type: 'Show me the summary statistics for sample_data'\n   in the 'Enter prompt' box and click 'Analyze'.\n4. Analyze runs the code immediately. Use the Rcode button if you only want to generate code first, then run it from the R Code pane.\n5. Click one or more datasets on the left to mark them as active, then enter a prompt such as 'regress mpg on hp and cyl'. If Vibestats needs one more detail, it will ask a short coaching question before generating R code."
   };
   const [resultEntries, setResultEntries] = useState([initialWelcome]);
   const [logEntries, setLogEntries] = useState([initialWelcome]);
@@ -1873,7 +1935,7 @@ ${currentCode}` });
       return;
     }
     if (res.savedDataset) {
-      pushLog({ head: ts + ' — large result', text:`A large result was kept in the Results card.` });
+      pushLog({ head: ts + ' — large result saved', text:`Large result exceeded 100 rows and was automatically saved as dataset: ${res.savedDataset}.` });
     }
     if (res.newDataset && res.newDataset !== res.savedDataset && !String(res.savedDataset || '').split(',').includes(res.newDataset)) {
       markDatasetKind(res.newDataset, 'created');
@@ -1883,7 +1945,7 @@ ${currentCode}` });
     let displayed = false;
     if (res.resultHtml || (res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot) {
       pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: res.resultHtml || '', plot: res.plot || null,
-                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: res.resultKey || null });
+                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: null });
       displayed = true;
     }
     if (!displayed && res.consoleText && res.consoleText.trim()) {
@@ -2301,7 +2363,7 @@ ${currentCode}` });
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window', style:{flex:'0 0 33%'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'R Code', h('span',{className:'grow'}),
-            h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
+            h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▸'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane')},'⛶')),
           h('div', { className:'content' },
             h('div', { className:'rcode-pane' },
@@ -2309,7 +2371,7 @@ ${currentCode}` });
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), modal.blockInfo && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }},'Modify'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▶'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
+        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), modal.blockInfo && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }},'Modify'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▸'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
         modal.noteDataset ? h('div',{className:'mbody'},
             h('div',{className:'note-pane'},
               h('div',{className:'note-title'}, modal.noteDataset),
