@@ -453,7 +453,7 @@
   .rcode-pane { display:flex; flex-direction:column; height:100%; min-height:0; }
   .rcode-toolbar { flex:0 0 auto; display:none; }
   .rcode-toolbar .grow { flex:1; }
-  .rcode-run { min-width:28px; height:22px; padding:1px 6px !important; border-radius:3px !important; font-size:11px !important; line-height:1; }
+  .rcode-run { width:28px; min-width:28px; height:24px; padding:0 !important; border-radius:3px !important; font-size:16px !important; line-height:1; display:inline-flex !important; align-items:center !important; justify-content:center !important; }
   .rcode-full { display:none; }
   .rcode-textarea { flex:1; min-height:0; width:100%; resize:none; border:0; outline:none; border-radius:0; background:var(--bg); color:var(--ink); font-family:var(--mono); font-size:13px; line-height:1.5; padding:11px 12px; white-space:pre; overflow:auto; tab-size:2; }
   .rcode-textarea::placeholder { color:var(--ink-faint); }
@@ -463,8 +463,14 @@
   .orange-response-card .coach-options { margin-top:10px; }
   .entry-actions .save-pdf-btn { border-color: color-mix(in srgb, var(--amber) 55%, var(--line)) !important; color: var(--amber) !important; }
 
-  .titlebar .rcode-run.tbtn { color:var(--ink-faint) !important; border-color:var(--line-bright) !important; background:transparent !important; font-size:11px !important; padding:1px 6px !important; transform:none !important; }
-  .titlebar .rcode-run.tbtn:hover { color:var(--ink) !important; border-color:var(--accent) !important; background:transparent !important; transform:none !important; }
+  .window > .titlebar .tbtn, .modal h3 .x, .modal h3 .max, .modal-edit-btn {
+    width:28px !important; min-width:28px !important; height:24px !important;
+    padding:0 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important;
+    border-radius:3px !important; box-sizing:border-box !important; line-height:1 !important;
+  }
+  .window > .titlebar .tbtn { flex:0 0 28px; }
+  .titlebar .rcode-run.tbtn, .modal h3 .rcode-run.max { color:var(--ink-faint) !important; border-color:var(--line-bright) !important; background:transparent !important; font-size:16px !important; transform:none !important; }
+  .titlebar .rcode-run.tbtn:hover, .modal h3 .rcode-run.max:hover { color:var(--ink) !important; border-color:var(--accent) !important; background:transparent !important; transform:none !important; }
   .code-editor-shell { height:100%; width:100%; display:flex; flex-direction:column; background:var(--bg); }
   .code-editor-hint { flex:0 0 auto; padding:7px 12px; border-bottom:1px solid var(--line); color:var(--ink-faint); font-family:var(--mono); font-size:11px; background:color-mix(in srgb, var(--panel-2) 40%, var(--bg)); }
   .code-editor-hint b { color:var(--accent); }
@@ -1014,9 +1020,9 @@ async function executeR(code, allowNewDatasets=false) {
     }
     const hasDisplay = !!(resultHtml || (resultText && resultText.trim()) || (consoleText && consoleText.trim()) || plot);
     if (!hasDisplay) {
-      const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-      const datasetNote = '';
-      resultHtml = `<section class="notice-card"><b>No displayable result</b>${datasetNote}</section>`;
+      resultHtml = '';
+      resultText = '';
+      if (!consoleText || !consoleText.trim()) consoleText = 'R code ran successfully. No printed result object, console output, or plot was produced.';
     }
     return { resultText, resultHtml, consoleText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
   }
@@ -1398,11 +1404,27 @@ function buildTextPdfBlob(title, text) {
   add(`trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
   return new Blob(parts, { type:'application/pdf' });
 }
+async function saveBlobFileDirect(defaultName, mime, blob) {
+  if (window.showSaveFilePicker) {
+    const ext = '.' + String(defaultName).split('.').pop();
+    const handle = await window.showSaveFilePicker({ suggestedName: defaultName, types:[{ description: defaultName, accept:{ [mime]: [ext] } }] });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return true;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = defaultName;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  return false;
+}
 async function saveElementAsPdf(element, defaultName='vibestats-result.pdf') {
   const title = element.querySelector('.ehead')?.textContent?.trim() || 'Vibestats result';
   const text = extractEntryTextForPdf(element);
   const pdfBlob = buildTextPdfBlob(title, text);
-  await saveBlobFile(defaultName, 'application/pdf', pdfBlob);
+  await saveBlobFileDirect(defaultName, 'application/pdf', pdfBlob);
 }
 function styleTextForExport() {
   return Array.from(document.querySelectorAll('style')).map(x => x.textContent || '').join('\n') + `
@@ -1949,9 +1971,16 @@ ${currentCode}` });
       displayed = true;
     }
     if (!displayed && res.consoleText && res.consoleText.trim()) {
-      const consoleLines = res.consoleText.split(/\r?\n/).length;
-      if (consoleLines <= 100) {
-        pushResult({ head: ts + ' — console output', text: res.consoleText.trim(), html:'', plot:null,
+      const ctext = res.consoleText.trim();
+      const consoleLines = ctext.split(/\r?\n/).length;
+      if (ctext.startsWith('R code ran successfully. No printed result object')) {
+        pushLog({ head: ts + ' — completed', text: `R code ran successfully.
+
+Executed code:
+${code || '(none)'}` });
+        displayed = true;
+      } else if (consoleLines <= 100) {
+        pushResult({ head: ts + ' — console output', text: ctext, html:'', plot:null,
                      _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: null });
         displayed = true;
       } else {
@@ -1961,7 +1990,10 @@ ${currentCode}` });
       pushLog({ head: ts + ' — technical log', text: res.consoleText.trim() });
     }
     if (!displayed && !res.savedDataset && !(res.consoleText && res.consoleText.trim())) {
-      pushLog({ head: ts, text: '(no output)' });
+      pushLog({ head: ts + ' — completed', text: `R code ran successfully.
+
+Executed code:
+${code || '(none)'}` });
     }
     if (!res.error) {
       setLastRunContext({
@@ -2363,7 +2395,7 @@ ${currentCode}` });
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window', style:{flex:'0 0 33%'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'R Code', h('span',{className:'grow'}),
-            h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▸'),
+            h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane')},'⛶')),
           h('div', { className:'content' },
             h('div', { className:'rcode-pane' },
@@ -2371,7 +2403,7 @@ ${currentCode}` });
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), modal.blockInfo && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }},'Modify'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▸'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
+        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }}, '✎'), modal.blockInfo && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }}, '✎'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▶'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
         modal.noteDataset ? h('div',{className:'mbody'},
             h('div',{className:'note-pane'},
               h('div',{className:'note-title'}, modal.noteDataset),
