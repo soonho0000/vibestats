@@ -1,4 +1,23 @@
 export const PROMPT_VERSION = 'planner-coach-guardrails-2026-06-28-v8-real-r-local-scope';
+export const OPENAI_MODEL = 'gpt-4.1-mini';
+export const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
+
+export const METHOD_REQUIREMENTS = [
+  { id:'wls', label:'WLS / weighted least squares', pattern:/(\bwls\b|weighted\s+(least\s+squares|regression)|가중.*(회귀|최소제곱))/i, needs:'weight variable' },
+  { id:'iv', label:'IV / 2SLS regression', pattern:/(\biv\b|2sls|two[-\s]?stage|instrumental\s+variable|도구변수|이단계|2단계)/i, needs:'endogenous variable and instrument variable' },
+  { id:'panel', label:'panel regression', pattern:/(panel|fixed\s+effects|random\s+effects|within\s+model|패널|고정효과|임의효과|랜덤효과)/i, needs:'unit/id variable and time variable' },
+  { id:'did', label:'difference-in-differences', pattern:/(difference[-\s]?in[-\s]?differences|\bdid\b|이중차분|차분의\s*차분)/i, needs:'treatment/group variable and post/time variable' },
+  { id:'logit', label:'logistic/probit regression', pattern:/(logistic|logit|probit|로지스틱|프로빗)/i, needs:'binary dependent variable' },
+  { id:'survival', label:'survival analysis', pattern:/(survival|cox|hazard|생존분석|위험률)/i, needs:'time variable and event indicator' },
+  { id:'matching', label:'matching / propensity score', pattern:/(propensity|psm|matching|매칭|성향점수)/i, needs:'treatment variable and covariates' },
+  { id:'time_series', label:'time-series model', pattern:/(arima|\bvar\b|garch|arch|acf|pacf|stationar|시계열|정상성|자기상관)/i, needs:'time/order variable or clearly ordered series' }
+];
+
+export const SEND_SCHEMA_SAMPLES = false;
+export const SHORT_CONTEXT_CHARS = 1200;
+export const INTERPRET_RESULT_CHARS = 2500;
+export const MAX_LLM_CHARS = 30000;
+
 
 export const SYSTEM_PROMPT = `You are Vibestats, a natural-language-to-R statistical analysis coach and R code planner.
 Return ONLY valid JSON with keys: needsClarification, message, options, summary, formula, code.
