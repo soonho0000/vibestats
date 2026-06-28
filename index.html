@@ -451,17 +451,26 @@
   .nl-actions .analyze-btn { flex:1 1 auto; min-width:118px; }
   .nl-actions .rcode-btn { flex:0 0 70px; min-width:70px; padding:0 10px !important; }
   .rcode-pane { display:flex; flex-direction:column; height:100%; min-height:0; }
-  .rcode-toolbar { flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--line); background: color-mix(in srgb, var(--panel-2) 55%, var(--panel)); }
+  .rcode-toolbar { flex:0 0 auto; display:none; }
   .rcode-toolbar .grow { flex:1; }
-  .rcode-run { width:34px; height:30px; flex:0 0 34px; padding:0 !important; border-radius:999px !important; font-size:15px !important; }
-  .rcode-full { flex:0 0 auto; min-width:76px; height:30px; padding:0 10px !important; }
-  .rcode-textarea { flex:1; min-height:0; width:100%; resize:none; border:0; outline:none; border-radius:0; background:var(--bg); color:var(--ink); font-family:var(--mono); font-size:13px; line-height:1.5; padding:11px 12px; white-space:pre; overflow:auto; }
+  .rcode-run { min-width:28px; height:22px; padding:0 8px !important; border-radius:999px !important; font-size:12px !important; line-height:1; }
+  .rcode-full { display:none; }
+  .rcode-textarea { flex:1; min-height:0; width:100%; resize:none; border:0; outline:none; border-radius:0; background:var(--bg); color:var(--ink); font-family:var(--mono); font-size:13px; line-height:1.5; padding:11px 12px; white-space:pre; overflow:auto; tab-size:2; }
   .rcode-textarea::placeholder { color:var(--ink-faint); }
   .orange-response-card { background: color-mix(in srgb, var(--amber) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--amber) 42%, var(--line)); border-left: 4px solid var(--amber); border-radius: 10px; padding: 12px 14px; box-shadow: var(--result-card-shadow); color: var(--ink); font-family: var(--sans); line-height:1.55; }
   .orange-response-card .orange-title { font-family:var(--mono); font-size:11px; color:var(--amber); font-weight:800; letter-spacing:.4px; margin-bottom:6px; text-transform:uppercase; }
   .orange-response-card .orange-formula { margin-top:8px; padding-top:8px; border-top:1px dashed color-mix(in srgb, var(--amber) 45%, var(--line)); font-family:var(--mono); color:var(--amber); white-space:pre-wrap; }
   .orange-response-card .coach-options { margin-top:10px; }
   .entry-actions .save-pdf-btn { border-color: color-mix(in srgb, var(--amber) 55%, var(--line)) !important; color: var(--amber) !important; }
+
+  .titlebar .rcode-run.tbtn { color:var(--green) !important; border-color:color-mix(in srgb, var(--green) 45%, var(--line-bright)); background:linear-gradient(180deg, var(--panel-2), var(--panel)); font-size:12px; padding:1px 8px; }
+  .titlebar .rcode-run.tbtn:hover { color:var(--bg) !important; background:var(--green); border-color:var(--green); }
+  .code-editor-shell { height:100%; width:100%; display:flex; flex-direction:column; background:var(--bg); }
+  .code-editor-hint { flex:0 0 auto; padding:7px 12px; border-bottom:1px solid var(--line); color:var(--ink-faint); font-family:var(--mono); font-size:11px; background:color-mix(in srgb, var(--panel-2) 40%, var(--bg)); }
+  .code-editor-hint b { color:var(--accent); }
+  .modal .rcode-pane { height:100%; width:100%; }
+  .modal .rcode-textarea { font-size:14px; line-height:1.58; padding:14px 16px; min-height:0; }
+  .modal.rcode-modal .mbody { padding:0 !important; display:flex; min-height:0; }
   @media print {
     body { overflow: visible !important; background:#fff !important; color:#000 !important; }
     body * { visibility:hidden !important; }
@@ -1310,6 +1319,133 @@ function resultsPrintableHtml(entries) {
   }
   return chunks.join('\n') || '<p>No results to export.</p>';
 }
+
+async function saveElementAsPdf(element, defaultName='vibestats-result.pdf') {
+  const canvas = await renderElementToCanvas(element);
+  const pageW = 595.28, pageH = 841.89; // A4 points
+  const margin = 28;
+  const maxW = pageW - margin * 2;
+  const scale = maxW / canvas.width;
+  const pageCanvasH = Math.floor((pageH - margin * 2) / scale);
+  const slices = [];
+  for (let y = 0; y < canvas.height; y += pageCanvasH) {
+    const hgt = Math.min(pageCanvasH, canvas.height - y);
+    const slice = document.createElement('canvas');
+    slice.width = canvas.width;
+    slice.height = hgt;
+    const ctx = slice.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, slice.width, slice.height);
+    ctx.drawImage(canvas, 0, y, canvas.width, hgt, 0, 0, canvas.width, hgt);
+    slices.push({ dataUrl: slice.toDataURL('image/jpeg', 0.94), width: slice.width, height: slice.height });
+  }
+  const pdfBlob = buildImagePdf(slices, pageW, pageH, margin);
+  await saveBlobFile(defaultName, 'application/pdf', pdfBlob);
+}
+function styleTextForExport() {
+  return Array.from(document.querySelectorAll('style')).map(x => x.textContent || '').join('\n') + `
+    body{background:#fff;color:#111;overflow:visible;font-family:Arial,sans-serif;}
+    .entry{border-bottom:0;padding:0;white-space:normal;word-break:normal;}
+    .entry-actions,button{display:none!important;}
+    .result-card,.notice-card,.error-card,.orange-response-card{box-shadow:none;background:#fff;color:#111;}
+    .ehead{color:#555!important;font-family:Arial,sans-serif;}
+    table.result-table th{background:#f2f2f2;color:#111;}
+    table.result-table td{color:#111;}
+    .result-pre{background:#fff;color:#111;box-shadow:none;}
+  `;
+}
+async function renderElementToCanvas(element) {
+  const clone = element.cloneNode(true);
+  clone.querySelectorAll('.entry-actions, button').forEach(x => x.remove());
+  const rect = element.getBoundingClientRect();
+  const width = Math.max(620, Math.ceil(rect.width || 720));
+  const holder = document.createElement('div');
+  holder.style.cssText = `width:${width}px;background:#fff;color:#111;padding:18px;font-family:Arial,sans-serif;`;
+  holder.appendChild(clone);
+  holder.style.position = 'fixed';
+  holder.style.left = '-10000px';
+  holder.style.top = '0';
+  document.body.appendChild(holder);
+  const height = Math.max(120, Math.ceil(holder.scrollHeight + 36));
+  const html = `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;background:#fff;color:#111;"><style>${styleTextForExport()}</style>${holder.innerHTML}</div>`;
+  document.body.removeChild(holder);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${html}</foreignObject></svg>`;
+  const url = URL.createObjectURL(new Blob([svg], { type:'image/svg+xml;charset=utf-8' }));
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = reject;
+      im.src = url;
+    });
+    const ratio = Math.min(2, window.devicePixelRatio || 1.5);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(width * ratio);
+    canvas.height = Math.ceil(height * ratio);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(ratio, ratio);
+    ctx.drawImage(img, 0, 0);
+    return canvas;
+  } finally { URL.revokeObjectURL(url); }
+}
+function buildImagePdf(images, pageW=595.28, pageH=841.89, margin=28) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const offsets = [0];
+  let len = 0;
+  const add = (x) => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (n, bodyParts) => { offsets[n] = len; add(`${n} 0 obj\n`); for (const bp of bodyParts) add(bp); add(`\nendobj\n`); };
+  function dataUrlBytes(dataUrl) {
+    const bin = atob(dataUrl.split(',')[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    return bytes;
+  }
+  add('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n');
+  const pageObjs = [];
+  let objNum = 3;
+  for (const im of images) {
+    const imgObj = objNum++;
+    const contentObj = objNum++;
+    const pageObj = objNum++;
+    pageObjs.push(pageObj);
+    const jpg = dataUrlBytes(im.dataUrl);
+    obj(imgObj, [`<< /Type /XObject /Subtype /Image /Width ${im.width} /Height ${im.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`, jpg, `\nendstream`]);
+    const drawW = pageW - margin*2;
+    const drawH = Math.min(pageH - margin*2, drawW * im.height / im.width);
+    const x = margin;
+    const y = pageH - margin - drawH;
+    const stream = `q\n${drawW.toFixed(2)} 0 0 ${drawH.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm\n/Im${imgObj} Do\nQ\n`;
+    obj(contentObj, [`<< /Length ${enc.encode(stream).length} >>\nstream\n${stream}endstream`]);
+    obj(pageObj, [`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Resources << /XObject << /Im${imgObj} ${imgObj} 0 R >> >> /Contents ${contentObj} 0 R >>`]);
+  }
+  obj(1, [`<< /Type /Catalog /Pages 2 0 R >>`]);
+  obj(2, [`<< /Type /Pages /Kids [${pageObjs.map(n=>`${n} 0 R`).join(' ')}] /Count ${pageObjs.length} >>`]);
+  const startxref = len;
+  const maxObj = objNum - 1;
+  add(`xref\n0 ${maxObj + 1}\n0000000000 65535 f \n`);
+  for (let i=1;i<=maxObj;i++) add(`${String(offsets[i] || 0).padStart(10,'0')} 00000 n \n`);
+  add(`trailer\n<< /Size ${maxObj + 1} /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF`);
+  return new Blob(parts, { type:'application/pdf' });
+}
+function handleCodeKeyDown(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const el = e.currentTarget;
+    const start = el.selectionStart, end = el.selectionEnd;
+    const v = el.value;
+    const next = v.slice(0, start) + '  ' + v.slice(end);
+    el.value = next;
+    el.selectionStart = el.selectionEnd = start + 2;
+    el.dispatchEvent(new Event('input', { bubbles:true }));
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    const btn = document.querySelector('[data-run-rcode="1"]');
+    if (btn) btn.click();
+  }
+}
 function htmlToText(html) {
   if (!html) return '';
   try {
@@ -1372,13 +1508,13 @@ function useSplitter() {
   }, []);
 }
 
-function StreamPane({ entries, kind, onInterpret, onSavePdf, onDiagnostics, onCoachOption }) {
+function StreamPane({ entries, kind, onInterpret, onSavePdf, onCoachOption }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [entries.length]);
   if (!entries.length) return h('div', { className:'stream', ref },
     h('span', { className:'placeholder' }, 'Analysis results and system messages will accumulate here.'));
   return h('div', { className:'stream', ref },
-    entries.map(en => h('div', { key:en.id, className:'entry'+(en.error?' err':'')+(en.system?' system':'') },
+    entries.map(en => h('div', { key:en.id, 'data-entry-id':en.id, className:'entry'+(en.error?' err':'')+(en.system?' system':'') },
       h('div', { className:'ehead' }, en.head),
       en.plot && h('img', { src:en.plot }),
       en.coach && h('section', { className:'orange-response-card' },
@@ -1396,8 +1532,7 @@ function StreamPane({ entries, kind, onInterpret, onSavePdf, onDiagnostics, onCo
         h('div', { className:'entry-actions' },
           onInterpret && !en.coach && (en.interp ? h('div',{className:'interp'}, en.interp)
             : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? '해석 중…' : 'Interpret')),
-          onDiagnostics && en._code && !en._isDetail && h('button', { className:'nl-go', onClick:()=>onDiagnostics(en.id), disabled:!!en.diagnosing }, en.diagnosing ? 'Diagnostics…' : 'Diagnostics'),
-          onSavePdf && !en.coach && h('button', { className:'nl-go save-pdf-btn', onClick:()=>onSavePdf() }, 'Save PDF')))));
+          onSavePdf && !en.coach && h('button', { className:'nl-go save-pdf-btn', onClick:()=>onSavePdf(en.id) }, 'Save PDF')))));
 }
 
 function App() {
@@ -1831,21 +1966,21 @@ ${currentCode}` });
     hideProgress(); setBusy(false);
   }
 
-  async function onSavePdf() {
-    const defaultName = 'vibestats-results.pdf';
-    const chosen = prompt('PDF file name:', defaultName);
-    if (chosen === null) return;
-    const safeName = (chosen || defaultName).replace(/\.pdf$/i,'') || 'vibestats-results';
-    const html = resultsPrintableHtml(resultEntries);
-    const w = window.open('', '_blank');
-    if (!w) { alert('Popup was blocked. Please allow popups to export PDF.'); return; }
-    w.document.write(`<!doctype html><html><head><title>${escHtml(safeName)}</title><style>
-      body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:24px;line-height:1.45}
-      h1{font-size:18px;margin:0 0 16px} .entry{page-break-inside:avoid;margin-bottom:18px;border-bottom:1px solid #ddd;padding-bottom:12px}
-      .ehead{font-size:11px;color:#666;margin-bottom:6px}.result-card,.notice-card,.error-card,.orange-response-card{border:1px solid #ccc;border-left:4px solid #d9a45b;border-radius:8px;padding:10px 12px;margin:8px 0}.result-card{border-left-color:#4f6df5}.error-card{border-left-color:#c84f4f}.result-card-title,.orange-title{font-weight:700;color:#333;margin-bottom:6px;font-family:monospace}table{border-collapse:collapse;font-size:12px}th,td{border:1px solid #ccc;padding:5px 7px}th{background:#f2f2f2}pre{white-space:pre-wrap;border:1px solid #ddd;border-radius:6px;padding:10px}img{max-width:100%;border:1px solid #ddd}
-    </style></head><body><h1>Vibestats Results</h1>${html}</body></html>`);
-    w.document.close();
-    setTimeout(()=>{ w.focus(); w.print(); }, 300);
+  async function onSavePdf(entryId) {
+    const en = resultEntries.find(e => e.id === entryId);
+    if (!en) return;
+    const defaultName = 'vibestats-result-' + String(entryId) + '.pdf';
+    const safeName = defaultName;
+    const node = document.querySelector(`[data-entry-id="${entryId}"]`);
+    if (!node) { alert('Result card was not found.'); return; }
+    try {
+      showProgress('Preparing PDF for this result card...', 35, 'The PDF will contain only this selected result card.');
+      await saveElementAsPdf(node, safeName);
+    } catch(err) {
+      alert('PDF export failed: ' + (err.message || err));
+    } finally {
+      hideProgress();
+    }
   }
 
 
@@ -2128,7 +2263,7 @@ ${currentCode}` });
             h('button',{className:'tbtn', title:'Clear', onClick:()=>setResultEntries([])},'🧹'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Results','result')},'⛶')),
           h('div', { className:'content' },
-            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onDiagnostics:onDiagnosticsResult, onCoachOption:onCoachOption }))),
+            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption }))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window prompt-window', style:{flex:'0 0 185px'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'})),
@@ -2166,18 +2301,15 @@ ${currentCode}` });
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window', style:{flex:'0 0 33%'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'R Code', h('span',{className:'grow'}),
+            h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane')},'⛶')),
           h('div', { className:'content' },
             h('div', { className:'rcode-pane' },
-              h('div', { className:'rcode-toolbar' },
-                h('button', { className:'rcode-run action-btn primary', onClick:onRunBlock, disabled:busy, title:'Run and automatically save this step as a block' }, '▶'),
-                h('button', { className:'rcode-full action-btn', onClick:()=>fullscreen('R Code','rcodepane'), title:'View R code full screen' }, '전체'),
-                h('span', { className:'grow' })),
-              h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onChange:e=>setCodeText(e.target.value) })))) ) ),
+              h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) })))) ) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
-      h('div', { className:'modal'+(modal.full?' full':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), modal.blockInfo && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }},'Modify'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
+      h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
+        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }},'Modify'), modal.blockInfo && h('button',{className:'modal-edit-btn', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }},'Modify'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▶'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
         modal.noteDataset ? h('div',{className:'mbody'},
             h('div',{className:'note-pane'},
               h('div',{className:'note-title'}, modal.noteDataset),
@@ -2201,7 +2333,7 @@ ${currentCode}` });
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
           : modal.productInfo ? h('div',{className:'mbody'}, h(ProductInfo))
-          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSavePdf: modal.streamKind==='result'?onSavePdf:null, onDiagnostics: modal.streamKind==='result'?onDiagnosticsResult:null, onCoachOption:onCoachOption}))
+          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSavePdf: modal.streamKind==='result'?onSavePdf:null, onCoachOption:onCoachOption}))
           : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
             h('div', { className:'ds-toolbar' },
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
@@ -2211,12 +2343,10 @@ ${currentCode}` });
               dsNames.length ? dsNames.map(n=>dsItem(n,schema[n],datasetKinds[n] || (newNames.includes(n) ? 'created' : 'uploaded'),selectedDatasets.includes(n),{showPreview,setCtx,setSelectedDatasets,onSaveDataset,onRenameDataset,onDeleteDataset,openDatasetNote,openDatasetEditor,datasetNotes,activeDatasets,toggleActiveDataset}))
                 : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete'))))
           : modal.blocksView ? h('div',{className:'mbody',style:{padding:'14px'}}, h('div',{className:'blocks-flow'}, renderBlocksFlow(blocksRef.current, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds})))
-          : modal.rcodePane ? h('div',{className:'mbody',style:{padding:0, display:'flex'}},
-            h('div', { className:'rcode-pane' },
-              h('div', { className:'rcode-toolbar' },
-                h('button', { className:'rcode-run action-btn primary', onClick:onRunBlock, disabled:busy, title:'Run and automatically save this step as a block' }, '▶'),
-                h('span', { className:'grow' })),
-              h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onChange:e=>setCodeText(e.target.value) })))
+          : modal.rcodePane ? h('div',{className:'mbody'},
+            h('div', { className:'code-editor-shell' },
+              h('div', { className:'code-editor-hint' }, h('b', null, 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · code is saved to Blocks when run'),
+              h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) })))
           : modal.html ? h('div',{className:'mbody', dangerouslySetInnerHTML:{__html:modal.html}})
           : h('div',{className:'mbody'}, modal.body),
         !(modal.noteDataset || modal.datasetEdit || modal.newDataset || modal.blockEdit) && h('div', { className:'mfoot' }, h('button',{onClick:()=>setModal(null)},'Close')))),
