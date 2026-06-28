@@ -886,6 +886,8 @@ Previous analysis context:
 ${contextText}${followHint}
 
 User input: ${text}
+
+Language/output rule: all user-facing text returned by the model, including summary, clarification questions, options, formula explanations, and any R code comments, must use the same language as this user input.
 JSON:`;
   const raw = await callLLM([
     { role:'system', content: SYSTEM_PROMPT },
@@ -929,6 +931,8 @@ ${entry?._code || '(none)'}
 Previous visible result excerpt:
 ${String((entry?.text || '') + '\n' + htmlToText(entry?.html || '')).slice(0, DETAILS_CONTEXT_CHARS)}
 
+Language/output rule: use the same language as the user's request or the previous analysis summary.
+
 JSON:`;
   const raw = await callLLM([
     { role:'system', content: DIAGNOSTICS_SYSTEM_PROMPT },
@@ -952,7 +956,16 @@ async function repairRCode(code, summary, errorText, attempt) {
 }
 
 async function interpretResult(summary, code, resultText) {
-  const userMsg = `분석 목적: ${summary}\nR code:\n${code}\n\n결과:\n${String(resultText || '').slice(0, INTERPRET_RESULT_CHARS)}`;
+  const userMsg = `Original user request or analysis purpose:
+${summary || '(not provided)'}
+
+R code:
+${code}
+
+Result:
+${String(resultText || '').slice(0, INTERPRET_RESULT_CHARS)}
+
+Language rule: interpret in the same language as the original user request or analysis purpose above.`;
   return (await callLLM([
     { role:'system', content: INTERPRET_SYSTEM_PROMPT },
     { role:'user', content: userMsg }
@@ -965,17 +978,17 @@ async function executeR(code, allowNewDatasets=false) {
   const resultKey = '.vibestats_result_' + Date.now() + '_' + Math.floor(Math.random()*100000);
   const wrap = `
 .vibestats_run <- function() {
-  .env <- .nlstat_env; result <- NULL
+  .env <- .nlstat_env; .run_env <- new.env(parent=.env); result <- NULL
   .plotfile <- "/tmp/__vibestats_plot.png"
   if (file.exists(.plotfile)) file.remove(.plotfile)
   grDevices::png(.plotfile, width=720, height=480, res=96)
   .console <- capture.output({
-    .eval_out <- withVisible(eval(parse(text=${rLiteral}), envir=.env))
-    if (exists("result", envir=.env, inherits=FALSE)) result <- get("result", envir=.env)
+    .eval_out <- withVisible(eval(parse(text=${rLiteral}), envir=.run_env))
+    if (exists("result", envir=.run_env, inherits=FALSE)) result <- get("result", envir=.run_env)
     else if (isTRUE(.eval_out$visible)) result <- .eval_out$value
   })
   try(grDevices::dev.off(), silent=TRUE)
-  if (exists("result", envir=.env, inherits=FALSE)) { result <- get("result", envir=.env); rm("result", envir=.env) }
+  if (exists("result", envir=.run_env, inherits=FALSE)) { result <- get("result", envir=.run_env); rm("result", envir=.run_env) }
   .resultText <- ""; .resultHtml <- ""; .consoleText <- paste(.console, collapse="\\n"); .savedNames <- character(0); .resultKey <- ""
   .next_name <- function(prefix) { n <- prefix; i <- 1L; while (exists(n, envir=.env, inherits=FALSE)) { i <- i + 1L; n <- paste0(prefix, i) }; n }
   .esc_html <- function(x) {
@@ -1055,6 +1068,18 @@ async function executeR(code, allowNewDatasets=false) {
     .lineCount <- length(.printed)
     .resultHtml <- .obj_html(result, "Result")
     if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
+  }
+  .allow_new_datasets <- ${allowNewDatasets ? 'TRUE' : 'FALSE'}
+  if (isTRUE(.allow_new_datasets)) {
+    .created_names <- setdiff(ls(.run_env, all.names=FALSE), c('result'))
+    .created_names <- .created_names[!grepl('^\\.', .created_names)]
+    for (.nm in .created_names) {
+      .obj <- tryCatch(get(.nm, envir=.run_env, inherits=FALSE), error=function(e) NULL)
+      if (is.data.frame(.obj)) {
+        assign(.nm, .obj, envir=.env)
+        .savedNames <- unique(c(.savedNames, .nm))
+      }
+    }
   }
   paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__SAVED__", paste(.savedNames, collapse=","), "__RKEY__", .resultKey)
 }
@@ -1410,6 +1435,23 @@ function dataReferenceMessage(msg) {
 }
 
 function now() { return new Date().toLocaleTimeString('en-US', {hour12:false}); }
+function detectUserLanguage(text='') {
+  const s = String(text || '');
+  if (/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(s)) return 'ko';
+  if (/[ぁ-ゟ゠-ヿ]/.test(s)) return 'ja';
+  if (/[一-鿿]/.test(s)) return 'zh';
+  return 'en';
+}
+function uiTextForLanguage(key, source='') {
+  const lang = detectUserLanguage(source);
+  const dict = {
+    ko: { plan:'분석 계획', prepared:'분석 코드가 준비되었습니다.', need:'추가 정보가 필요합니다', coach:'Vibestats 코치' },
+    ja: { plan:'分析計画', prepared:'分析コードを準備しました。', need:'追加情報が必要です', coach:'Vibestats coach' },
+    zh: { plan:'分析计划', prepared:'分析代码已准备好。', need:'需要更多信息', coach:'Vibestats coach' },
+    en: { plan:'Analysis plan', prepared:'Analysis code was prepared.', need:'More information needed', coach:'Vibestats coach' }
+  };
+  return (dict[lang] || dict.en)[key] || (dict.en[key] || key);
+}
 // Extract readable text from a result HTML string (for Interpret/Details), preserving table layout.
 
 function escHtml(x) {
@@ -1839,7 +1881,7 @@ function App() {
   }
   function pushCoachCard(message, options=[], original='', summary='') {
     setCoach({ message, options: options || [], original, summary: summary || '' });
-    pushResult({ head:`[${now()}] Vibestats coach`, coach:{ title:'Vibestats coach', message, options: options || [] }, text:'', html:'', plot:null, resultKey:null });
+    pushResult({ head:`[${now()}] ${uiTextForLanguage('coach', original || message)}`, coach:{ title:uiTextForLanguage('coach', original || message), message, options: options || [] }, text:'', html:'', plot:null, resultKey:null });
   }
 
   function pushResult(en) { setResultEntries(es => [...es, { id:++entryCounter, ...en }]); }
@@ -1993,7 +2035,7 @@ function App() {
         pushCoachCard(a.message, a.options || [], text, a.summary || '');
       } else {
         setCoach(null); setCodeText(a.code); setRestate(a.summary); setFormula(a.formula||'');
-        pushAssistantCard('Analysis plan', a.summary || 'Analysis code was prepared.', a.formula || '');
+        pushAssistantCard(uiTextForLanguage('plan', text), a.summary || uiTextForLanguage('prepared', text), a.formula || '');
         if (runAfter) {
           const rr = await runCodeWithRepair(a.code, a.summary || text, shouldAllowDatasetCreation(text + '\n' + (a.summary || '')));
           await refreshSchema();
@@ -2012,7 +2054,7 @@ function App() {
     catch(e){
       const msg = e.message||String(e);
       setParseErr(msg);
-      pushAssistantCard('More information needed', msg);
+      pushAssistantCard(uiTextForLanguage('need', text), msg);
     }
     hideProgress(); setBusy(false);
   }
