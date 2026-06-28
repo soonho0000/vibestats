@@ -39,8 +39,8 @@ Environment:
 Output rules:
 - Every successful analysis must end with a non-empty variable named result. Never leave result NULL.
 - Put the answer in result as a small named list or compact data.frame with clean names; round numbers sensibly.
-- If you create/filter/merge/transform a dataset because the user explicitly asked, also set result to a compact summary with the new dataset name, row count, column count, and key variables.
-- Do not assign intermediate tables to the global environment. Use local variables for intermediate objects.
+- If you create/filter/merge/transform a dataset because the user explicitly asked, assign exactly ONE final data.frame with a clear dataset name and set .vibestats_save_dataset to that exact name, e.g. returns_data <- data.frame(...); .vibestats_save_dataset <- "returns_data". Also set result to a compact summary with the new dataset name, row count, column count, and key variables.
+- Do not assign intermediate tables to the global environment. Use local variables for intermediate objects, or wrap intermediate work inside local({ ... }). Only the final requested dataset should be assigned as a named data.frame.
 - Do not create result datasets unless the user explicitly asks to save/create a dataset. Large outputs should be summarized in result rather than assigned as datasets.
 - Default statistical output should resemble what SPSS typically shows for the same analysis: structured tables with clear names, not long prose. Keep it compact but include the standard SPSS-like tables users expect. Examples:
   · linear regression: Model Summary (R, R², adjusted R², residual SE, n), ANOVA/model test (df, F, p-value), and Coefficients (term, estimate, std_error, standardized_beta when practical, t, p_value).
