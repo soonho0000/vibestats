@@ -1111,7 +1111,7 @@ async function executeR(code, allowNewDatasets=false) {
     }
     let plot = null;
     try { const buf = await webR.FS.readFile('/tmp/__vibestats_plot.png');
-      if (buf && buf.length>300) { let bin=''; for(let i=0;i<buf.length;i++) bin+=String.fromCharCode(buf[i]);
+      if (buf && buf.length>200) { let bin=''; for(let i=0;i<buf.length;i++) bin+=String.fromCharCode(buf[i]);
         plot='data:image/png;base64,'+btoa(bin); await webR.FS.unlink('/tmp/__vibestats_plot.png').catch(()=>{}); } } catch(e){}
     await getSchema();
     let after = Object.keys(window._dsCache||{});

@@ -2,7 +2,7 @@
 
 export const OPENAI_MODEL = 'gpt-4.1-mini';
 export const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
-export const PROMPT_VERSION = 'planner-core-2026-06-28-browser-language-concise';
+export const PROMPT_VERSION = 'planner-core-2026-06-28-webr-plot-rules';
 
 export const METHOD_REQUIREMENTS = [
   { id:'wls', label:'WLS / weighted least squares', pattern:/(\bwls\b|weighted\s+(least\s+squares|regression)|가중.*(회귀|최소제곱))/i, needs:'weight variable' },
@@ -22,11 +22,14 @@ Use ONLY the Detected output language from the user message for summary, clarifi
 Ready JSON: {"status":"ready","code":"<R code>","summary":"<one-line summary>","formula":"<formula or empty>"}
 Clarify JSON: {"status":"needs_clarification","message":"<short question>","options":["<option1>","<option2>","<option3>"],"summary":"<missing info>"}
 
-R environment:
+R/WebR environment:
+- Code runs in WebR inside the browser, not RStudio or a local desktop R session.
 - Datasets are variables in the run environment; use exact dataset/column names from schema only.
-- base/stats/utils are ready; add library(pkg) for extra packages.
-- Plots are auto-captured.
-- Every successful code block must end with non-empty result.
+- base/stats/utils are ready; add library(pkg) for extra packages. Use WebR/browser-compatible packages and functions.
+- Avoid interactive or OS-dependent functions: View(), file.choose(), readline(), menu(), system(), shell(), setwd() to local paths, or external local file paths.
+- Plots are auto-captured from an active PNG graphics device. For base graphics, explicitly call plot(), hist(), boxplot(), qqnorm(), qqline(), pairs(), etc.
+- For ggplot2/lattice/grid plots, always assign the plot to an object and explicitly print it, e.g. p <- ggplot(...); print(p). Do not rely on implicit last-line plot printing.
+- Every successful code block must end with non-empty result, even when the main output is a plot.
 - For ordinary analysis, do not create datasets. For explicit create/save/filter/merge/transform requests, create exactly ONE final data.frame and set .vibestats_save_dataset to its name.
 - Keep intermediates local; do not assign ct/fit/tmp/model tables globally.
 
@@ -48,7 +51,8 @@ export const SHORT_CONTEXT_CHARS = 1200;
 export const INTERPRET_RESULT_CHARS = 2500;
 export const MAX_LLM_CHARS = 30000;
 
-export const REPAIR_SYSTEM_PROMPT = `Fix R code for WebR. Return ONLY JSON: {"code":"...","summary":"...","formula":"...","reason":"..."}.
-Use exact dataset/column names from schema. Preserve intent. End with non-empty result. Do not create datasets unless explicitly requested. Use the Detected output language for user-facing text.`;
+export const REPAIR_SYSTEM_PROMPT = `Fix R code for WebR in the browser. Return ONLY JSON: {"code":"...","summary":"...","formula":"...","reason":"..."}.
+Use exact dataset/column names from schema. Preserve intent. End with non-empty result. Do not create datasets unless explicitly requested. Use the Detected output language for user-facing text.
+WebR rules: avoid View(), file.choose(), readline(), menu(), system(), shell(), setwd(), and local OS paths. For ggplot2/lattice/grid plots, explicitly print the plot object, e.g. p <- ggplot(...); print(p). For base plots, explicitly call the plotting function.`;
 
 export const INTERPRET_SYSTEM_PROMPT = `Interpret the statistical result in ONLY the provided Output language. Do not infer language from variables, R code, tables, or context. Use 2-4 sentences. Explain meaning, direction, statistical importance, and one key limitation. Do not explain the R code.`;
