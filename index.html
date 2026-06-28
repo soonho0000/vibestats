@@ -496,6 +496,24 @@
     #printArea .entry-actions, #printArea button { display:none !important; }
   }
 
+
+  /* Final UI sizing fixes */
+  .sheet-toolbar { gap:10px; }
+  .sheet-toolbar .modal-edit-btn {
+    width:auto !important; min-width:96px !important; height:30px !important;
+    padding:0 14px !important; border-radius:8px !important;
+    white-space:nowrap !important; overflow:visible !important;
+  }
+  .sheet-toolbar input { height:30px; min-width:180px; }
+  .window > .titlebar .tbtn.text-tbtn {
+    width:auto !important; min-width:62px !important; height:24px !important;
+    padding:0 10px !important; white-space:nowrap !important;
+  }
+  .top-tools .issue-btn {
+    width:auto !important; min-width:116px !important; height:22px !important;
+    padding:0 10px !important; white-space:nowrap !important;
+  }
+
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -507,8 +525,7 @@
     "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
     "react-dom": "https://esm.sh/react-dom@18.3.1",
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-    "webr": "https://webr.r-wasm.org/latest/webr.mjs",
-    "html2canvas": "https://esm.sh/html2canvas@1.4.1"
+    "webr": "https://webr.r-wasm.org/latest/webr.mjs"
   }
 }
 </script>
@@ -1441,40 +1458,53 @@ async function saveBlobFileDirect(defaultName, mime, blob) {
   return false;
 }
 async function saveElementAsPdf(element, defaultName='vibestats-result.pdf') {
-  // Capture the result card EXACTLY as shown (Korean text included) by rasterizing the DOM,
-  // then place the image into a PDF. This avoids font/encoding breakage of text-based PDFs.
-  let html2canvas;
-  try { ({ default: html2canvas } = await import('html2canvas')); }
-  catch(e) { throw new Error('PDF renderer failed to load. Check your network connection and try again.'); }
-
-  // Clone the entry into an off-screen light-themed container so the PDF looks clean and printable.
+  // Use the browser print engine instead of canvas/image capture.
+  // This keeps tables and text selectable/copyable in the saved PDF.
   const clone = element.cloneNode(true);
-  clone.querySelectorAll('.entry-actions, button').forEach(x => x.remove());
-  const rect = element.getBoundingClientRect();
-  const width = Math.max(620, Math.ceil(rect.width || 720));
-  const holder = document.createElement('div');
-  holder.className = 'pdf-export-holder';
-  holder.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;background:#ffffff;color:#111;padding:20px;font-family:${getComputedStyle(document.body).fontFamily};`;
-  holder.appendChild(clone);
-  const exportStyle = document.createElement('style');
-  exportStyle.textContent = `
-    .pdf-export-holder, .pdf-export-holder * { color:#111 !important; box-shadow:none !important; }
-    .pdf-export-holder .ehead { color:#555 !important; }
-    .pdf-export-holder .result-card, .pdf-export-holder .notice-card, .pdf-export-holder .error-card, .pdf-export-holder .orange-response-card { background:#fff !important; border:1px solid #ddd !important; }
-    .pdf-export-holder table.result-table th { background:#f2f2f2 !important; color:#111 !important; }
-    .pdf-export-holder table.result-table td { color:#111 !important; }
-    .pdf-export-holder .result-pre { background:#fafafa !important; border:1px solid #eee !important; }
-    .pdf-export-holder .interp { background:#f3faf4 !important; border:1px solid #cde9d2 !important; }
-    .pdf-export-holder img { background:#fff !important; }
-  `;
-  holder.appendChild(exportStyle);
-  document.body.appendChild(holder);
+  clone.querySelectorAll('.entry-actions, button, script, style').forEach(x => x.remove());
+  clone.querySelectorAll('details').forEach(d => d.setAttribute('open', 'open'));
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  const styles = Array.from(document.querySelectorAll('style')).map(st => st.textContent || '').join('\n');
+  const title = String(defaultName || 'vibestats-result.pdf').replace(/\.pdf$/i, '');
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escHtml(title)}</title><style>
+    ${styles}
+    @page { size: auto; margin: 18mm; }
+    html, body { background:#fff !important; color:#111 !important; overflow:visible !important; height:auto !important; }
+    body { font-family: Arial, Helvetica, sans-serif !important; font-size: 12px !important; padding:0 !important; }
+    * { box-shadow:none !important; }
+    .entry { border:0 !important; padding:0 !important; white-space:normal !important; word-break:normal !important; }
+    .entry .ehead { color:#555 !important; margin-bottom:8px !important; }
+    .entry .ehead::before { content:'' !important; }
+    .result-html { display:block !important; }
+    .result-card, .notice-card, .error-card, .orange-response-card, .result-pre, .technical-log, .interp {
+      background:#fff !important; color:#111 !important; border:1px solid #ddd !important; box-shadow:none !important;
+      break-inside: avoid; page-break-inside: avoid;
+    }
+    .result-card-title, .orange-title { color:#111 !important; }
+    .result-table-wrap { overflow:visible !important; display:block !important; border:1px solid #ddd !important; }
+    table.result-table { width:100% !important; min-width:0 !important; border-collapse:collapse !important; }
+    table.result-table th, table.result-table td { color:#111 !important; border:1px solid #ddd !important; white-space:normal !important; }
+    table.result-table th { background:#f2f2f2 !important; }
+    img { max-width:100% !important; height:auto !important; }
+    .entry-actions, button { display:none !important; }
+  </style></head><body>${clone.outerHTML}</body></html>`);
+  doc.close();
+  await new Promise(resolve => setTimeout(resolve, 150));
   try {
-    const canvas = await html2canvas(holder, { backgroundColor:'#ffffff', scale: Math.min(2, window.devicePixelRatio || 1.5), useCORS:true, logging:false });
-    const pdfBlob = buildImagePdfFromCanvas(canvas);
-    await saveBlobFileDirect(defaultName, 'application/pdf', pdfBlob);
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
   } finally {
-    document.body.removeChild(holder);
+    setTimeout(() => { try { document.body.removeChild(iframe); } catch(e) {} }, 1200);
   }
 }
 function styleTextForExport() {
@@ -2140,7 +2170,7 @@ ${code || '(none)'}` });
     const node = document.querySelector(`[data-entry-id="${entryId}"]`);
     if (!node) { alert('Result card was not found.'); return; }
     try {
-      showProgress('Preparing PDF for this result card...', 35, 'The PDF will contain only this selected result card.');
+      showProgress('Preparing PDF for this result card...', 35, 'Use the browser Save as PDF dialog to choose file name and location.');
       await saveElementAsPdf(node, safeName);
     } catch(err) {
       alert('PDF export failed: ' + (err.message || err));
@@ -2417,6 +2447,7 @@ ${code || '(none)'}` });
       h('div', { className:'spacer' }),
       h('div', { className:'right' },
         h('div', { className:'top-tools' },
+          h('button', { className:'icon-btn issue-btn', title:'Report an Issue', onClick:()=>{ window.location.href='mailto:hesety00@gmail.com?subject=Vibestats%20Issue%20Report'; } }, 'Report an Issue'),
           h('button', { className:'icon-btn'+(themeMode==='light'?' active':''), title: themeMode==='light'?'Switch to night mode':'Switch to day mode', onClick:toggleTheme }, themeMode==='light'?'☀ Day':'☾ Night'),
           h('button', { className:'icon-btn', title:'Increase text size', onClick:increaseFont }, 'A＋'),
           h('button', { className:'icon-btn', title:'Reset text size', onClick:resetFont }, 'A'),
