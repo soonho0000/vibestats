@@ -667,8 +667,8 @@ async function getSchema() {
 // Prompt caching is still provider-side: the important part is that stable system prompts remain the first messages.
 import {
   OPENAI_MODEL, OPENAI_PROXY_URL, PROMPT_VERSION, METHOD_REQUIREMENTS,
-  SYSTEM_PROMPT, DETAILS_SYSTEM_PROMPT, DIAGNOSTICS_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, INTERPRET_SYSTEM_PROMPT,
-  SEND_SCHEMA_SAMPLES, SHORT_CONTEXT_CHARS, DETAILS_CONTEXT_CHARS, INTERPRET_RESULT_CHARS, MAX_LLM_CHARS
+  SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, INTERPRET_SYSTEM_PROMPT,
+  SEND_SCHEMA_SAMPLES, SHORT_CONTEXT_CHARS, INTERPRET_RESULT_CHARS, MAX_LLM_CHARS
 } from './vibestats-prompts.js';
 
 function formatSchema(s, includeSamples=SEND_SCHEMA_SAMPLES) {
@@ -887,7 +887,8 @@ ${contextText}${followHint}
 
 User input: ${text}
 
-Language/output rule: all user-facing text returned by the model, including summary, clarification questions, options, formula explanations, and any R code comments, must use the same language as this user input.
+Detected output language: ${outputLanguageInstruction(text)}
+Language/output rule: all user-facing text returned by the model, including summary, clarification questions, options, formula explanations, and any R code comments, must use ONLY the Detected output language. Do not infer language from dataset names, R code, variable names, or previous results.
 JSON:`;
   const raw = await callLLM([
     { role:'system', content: SYSTEM_PROMPT },
@@ -902,50 +903,25 @@ JSON:`;
   return { code:String(d.code), summary:String(d.summary || text), formula:String(d.formula || '') };
 }
 
-async function parseDetailsRequest(entry) {
-  const schema = await getSchema();
-  const userMsg = `Current datasets:\n${formatSchema(schema)}\n\nPrevious analysis summary:\n${entry?._summary || '(none)'}\n\nPrevious formula:\n${entry?._formula || '(none)'}\n\nPrevious R code:\n${entry?._code || '(none)'}\n\nPrevious visible result excerpt:\n${String((entry?.text || '') + '\n' + htmlToText(entry?.html || '')).slice(0, DETAILS_CONTEXT_CHARS)}\n\nJSON:`;
-  const raw = await callLLM([
-    { role:'system', content: DETAILS_SYSTEM_PROMPT },
-    { role:'user', content: userMsg }
-  ], true);
-  const d = parseLLMJson(raw, 'details');
-  if (!d.code) throw new Error("Details response did not include code.");
-  return { code:String(d.code), summary:String(d.summary || 'Detailed follow-up analysis'), formula:String(d.formula || entry?._formula || '') };
-}
-
-async function parseDiagnosticsRequest(entry) {
+async function repairRCode(code, summary, errorText, attempt) {
   const schema = await getSchema();
   const userMsg = `Current datasets:
 ${formatSchema(schema)}
 
-Previous analysis summary:
-${entry?._summary || '(none)'}
+Original task:
+${summary || '(not provided)'}
 
-Previous formula:
-${entry?._formula || '(none)'}
+Detected output language: ${outputLanguageInstruction(summary || code || '')}
+Language/output rule: keep all user-facing text in ONLY the Detected output language. Do not infer language from R code, variable names, or error messages.
 
-Previous R code:
-${entry?._code || '(none)'}
+Current R code:
+${code}
 
-Previous visible result excerpt:
-${String((entry?.text || '') + '\n' + htmlToText(entry?.html || '')).slice(0, DETAILS_CONTEXT_CHARS)}
+Error message:
+${errorText}
 
-Language/output rule: use the same language as the user's request or the previous analysis summary.
-
+Attempt number: ${attempt}/5
 JSON:`;
-  const raw = await callLLM([
-    { role:'system', content: DIAGNOSTICS_SYSTEM_PROMPT },
-    { role:'user', content: userMsg }
-  ], true);
-  const d = parseLLMJson(raw, 'diagnostics');
-  if (!d.code) throw new Error("Diagnostics response did not include code.");
-  return { code:String(d.code), summary:String(d.summary || 'Focused diagnostic analysis'), formula:String(d.formula || entry?._formula || '') };
-}
-
-async function repairRCode(code, summary, errorText, attempt) {
-  const schema = await getSchema();
-  const userMsg = `Current datasets:\n${formatSchema(schema)}\n\nOriginal task:\n${summary || '(not provided)'}\n\nCurrent R code:\n${code}\n\nError message:\n${errorText}\n\nAttempt number: ${attempt}/5\nJSON:`;
   const raw = await callLLM([
     { role:'system', content: REPAIR_SYSTEM_PROMPT },
     { role:'user', content: userMsg }
@@ -955,8 +931,11 @@ async function repairRCode(code, summary, errorText, attempt) {
   return { code:String(d.code), summary:String(d.summary || summary || ''), formula:String(d.formula || ''), reason:String(d.reason || '') };
 }
 
-async function interpretResult(summary, code, resultText) {
-  const userMsg = `Original user request or analysis purpose:
+async function interpretResult(summary, code, resultText, outputLanguage='') {
+  const langLabel = outputLanguage || outputLanguageInstruction(summary || '');
+  const userMsg = `Output language: ${langLabel}
+
+Original user request or analysis purpose:
 ${summary || '(not provided)'}
 
 R code:
@@ -965,7 +944,7 @@ ${code}
 Result:
 ${String(resultText || '').slice(0, INTERPRET_RESULT_CHARS)}
 
-Language rule: interpret in the same language as the original user request or analysis purpose above.`;
+Language rule: interpret using ONLY the Output language above. Do not infer the language from variable names, R code, table labels, or previous context.`;
   return (await callLLM([
     { role:'system', content: INTERPRET_SYSTEM_PROMPT },
     { role:'user', content: userMsg }
@@ -1455,20 +1434,43 @@ function dataReferenceMessage(msg) {
 }
 
 function now() { return new Date().toLocaleTimeString('en-US', {hour12:false}); }
-function detectUserLanguage(text='') {
-  const s = String(text || '');
-  if (/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(s)) return 'ko';
-  if (/[ぁ-ゟ゠-ヿ]/.test(s)) return 'ja';
-  if (/[一-鿿]/.test(s)) return 'zh';
-  return 'en';
+const LANGUAGE_NAMES = {
+  en:'English', zh:'Mandarin Chinese', hi:'Hindi', es:'Spanish', ar:'Modern Standard Arabic', fr:'French', bn:'Bengali', pt:'Portuguese', id:'Indonesian', ur:'Urdu', ru:'Russian', de:'Standard German', ja:'Japanese', pcm:'Nigerian Pidgin', arz:'Egyptian Arabic', mr:'Marathi', vi:'Vietnamese', te:'Telugu', sw:'Swahili', ha:'Hausa', tr:'Turkish', pnb:'Western Punjabi', tl:'Tagalog/Filipino', ta:'Tamil', yue:'Cantonese', wuu:'Wu/Shanghainese', fa:'Iranian Persian', ko:'Korean', am:'Amharic', th:'Thai'
+};
+const LOCALE_ALIASES = {
+  en:'en', zh:'zh', 'zh-cn':'zh', 'zh-sg':'zh', 'zh-hans':'zh', 'zh-tw':'zh', 'zh-hk':'yue', 'zh-mo':'yue', yue:'yue', wuu:'wuu', hi:'hi', es:'es', ar:'ar', 'ar-eg':'arz', fr:'fr', bn:'bn', pt:'pt', 'pt-br':'pt', id:'id', in:'id', ur:'ur', ru:'ru', de:'de', ja:'ja', pcm:'pcm', mr:'mr', vi:'vi', te:'te', sw:'sw', ha:'ha', tr:'tr', pnb:'pnb', pa:'pnb', tl:'tl', fil:'tl', ta:'ta', fa:'fa', ko:'ko', am:'am', th:'th'
+};
+function browserLocale() {
+  const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
+  return String(langs[0] || 'en').toLowerCase();
 }
-function uiTextForLanguage(key, source='') {
-  const lang = detectUserLanguage(source);
+function languageCodeFromLocale(locale='') {
+  const x = String(locale || '').toLowerCase();
+  if (LOCALE_ALIASES[x]) return LOCALE_ALIASES[x];
+  const base = x.split('-')[0];
+  return LOCALE_ALIASES[base] || 'en';
+}
+function detectUserLanguage() { return languageCodeFromLocale(browserLocale()); }
+function languageNameFor() { return LANGUAGE_NAMES[detectUserLanguage()] || 'English'; }
+function outputLanguageInstruction() {
+  const lang = detectUserLanguage();
+  const name = LANGUAGE_NAMES[lang] || 'English';
+  return `${name} (${lang}); browser locale=${browserLocale()}`;
+}
+function uiTextForLanguage(key) {
+  const lang = detectUserLanguage();
   const dict = {
-    ko: { plan:'분석 계획', prepared:'분석 코드가 준비되었습니다.', need:'추가 정보가 필요합니다', coach:'Vibestats 코치' },
-    ja: { plan:'分析計画', prepared:'分析コードを準備しました。', need:'追加情報が必要です', coach:'Vibestats coach' },
-    zh: { plan:'分析计划', prepared:'分析代码已准备好。', need:'需要更多信息', coach:'Vibestats coach' },
-    en: { plan:'Analysis plan', prepared:'Analysis code was prepared.', need:'More information needed', coach:'Vibestats coach' }
+    ko: { plan:'분석 계획', prepared:'분석 코드가 준비되었습니다.', need:'추가 정보가 필요합니다', coach:'Vibestats 코치', interpreting:'해석 중…' },
+    ja: { plan:'分析計画', prepared:'分析コードを準備しました。', need:'追加情報が必要です', coach:'Vibestats coach', interpreting:'解釈中…' },
+    zh: { plan:'分析计划', prepared:'分析代码已准备好。', need:'需要更多信息', coach:'Vibestats coach', interpreting:'解释中…' },
+    yue:{ plan:'分析計劃', prepared:'分析代碼已準備好。', need:'需要更多資料', coach:'Vibestats coach', interpreting:'解讀緊…' },
+    es: { plan:'Plan de análisis', prepared:'El código de análisis está listo.', need:'Se necesita más información', coach:'Vibestats coach', interpreting:'Interpretando…' },
+    fr: { plan:'Plan d’analyse', prepared:'Le code d’analyse est prêt.', need:'Informations supplémentaires nécessaires', coach:'Vibestats coach', interpreting:'Interprétation…' },
+    pt: { plan:'Plano de análise', prepared:'O código de análise está pronto.', need:'Mais informações são necessárias', coach:'Vibestats coach', interpreting:'Interpretando…' },
+    de: { plan:'Analyseplan', prepared:'Der Analysecode ist bereit.', need:'Weitere Informationen erforderlich', coach:'Vibestats coach', interpreting:'Wird interpretiert…' },
+    ru: { plan:'План анализа', prepared:'Код анализа подготовлен.', need:'Нужна дополнительная информация', coach:'Vibestats coach', interpreting:'Интерпретация…' },
+    ar: { plan:'خطة التحليل', prepared:'تم إعداد كود التحليل.', need:'مطلوب مزيد من المعلومات', coach:'Vibestats coach', interpreting:'جارٍ التفسير…' },
+    en: { plan:'Analysis plan', prepared:'Analysis code was prepared.', need:'More information needed', coach:'Vibestats coach', interpreting:'Interpreting…' }
   };
   return (dict[lang] || dict.en)[key] || (dict.en[key] || key);
 }
@@ -1831,7 +1833,7 @@ function StreamPane({ entries, kind, onInterpret, onSavePdf, onCoachOption, onTo
       kind==='result' && !en.error && !en.system && (en.text||en.html||en.plot||en.coach) &&
         h('div', { className:'entry-actions' },
           onInterpret && !en.coach && (en.interp ? h('div',{className:'interp'}, en.interp)
-            : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? '해석 중…' : 'Interpret')),
+            : h('button', { className:'nl-go', onClick:()=>onInterpret(en.id) }, en.interpreting ? uiTextForLanguage('interpreting', en._outputLanguage || en._summary || '') : 'Interpret')),
           onSavePdf && !en.coach && h('button', { className:'nl-go save-pdf-btn', onClick:()=>onSavePdf(en.id) }, 'Pdf')))));
 }
 
@@ -1897,11 +1899,11 @@ function App() {
 
 
   function pushAssistantCard(title, message, cardFormula='') {
-    pushResult({ head:`[${now()}] ${title}`, html:orangeCardHtml(title, message, cardFormula), text:'', plot:null, resultKey:null });
+    pushResult({ head:`[${now()}] ${title}`, html:orangeCardHtml(title, message, cardFormula), text:'', plot:null, resultKey:null, _outputLanguage:outputLanguageInstruction((title || '') + '\n' + (message || '')) });
   }
   function pushCoachCard(message, options=[], original='', summary='') {
     setCoach({ message, options: options || [], original, summary: summary || '' });
-    pushResult({ head:`[${now()}] ${uiTextForLanguage('coach', original || message)}`, coach:{ title:uiTextForLanguage('coach', original || message), message, options: options || [] }, text:'', html:'', plot:null, resultKey:null });
+    pushResult({ head:`[${now()}] ${uiTextForLanguage('coach', original || message)}`, coach:{ title:uiTextForLanguage('coach', original || message), message, options: options || [] }, text:'', html:'', plot:null, resultKey:null, _outputLanguage:outputLanguageInstruction(original || message) });
   }
 
   function pushResult(en) { setResultEntries(es => [...es, { id:++entryCounter, ...en }]); }
@@ -2049,7 +2051,7 @@ function App() {
     const block = { id, index, summary:rr.summary||generatedSummary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||generatedFormula||'', status, label:'', newline:false, userMemo:'' };
     setBlocks(bs => [...bs, block]);
     setActiveId(id);
-    dispatchOutput(rr.res, `#${index} ${rr.summary||generatedSummary||''}`.trim(), rr.code, rr.formula || generatedFormula || '', false);
+    dispatchOutput(rr.res, `#${index} ${rr.summary||generatedSummary||''}`.trim(), rr.code, rr.formula || generatedFormula || '', false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
     if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
     if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
@@ -2083,7 +2085,7 @@ function App() {
           const block = { id, index, summary:rr.summary||a.summary||text.slice(0,40), code:rr.code, formula:rr.formula||a.formula||'', status, label:'', newline:false, userMemo:'' };
           setBlocks(bs => [...bs, block]);
           setActiveId(id);
-          dispatchOutput(rr.res, `#${index} ${rr.summary||a.summary||''}`.trim(), rr.code, rr.formula || a.formula || '', false);
+          dispatchOutput(rr.res, `#${index} ${rr.summary||a.summary||''}`.trim(), rr.code, rr.formula || a.formula || '', false, outputLanguageInstruction(text));
           if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
           if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; }
         }
@@ -2158,7 +2160,7 @@ ${currentCode}` });
     const intentText = baseIntent.trim() ? baseIntent : code;
     const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40), shouldAllowDatasetCreation(intentText) || shouldAllowDirectRDatasetSave(code));
     await refreshSchema();
-    dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code, rr.formula || formula, false);
+    dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code, rr.formula || formula, false, outputLanguageInstruction(intentText));
     if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
     hideProgress(); setBusy(false);
   }
@@ -2177,14 +2179,15 @@ ${currentCode}` });
     const block = { id, index, summary:rr.summary||code.split('\n')[0].slice(0,40), code:rr.code, formula:rr.formula||'', status, label:'', newline:false, userMemo:'' };
     setBlocks(bs => [...bs, block]);
     setActiveId(id);
-    dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code, rr.formula || formula, false);
+    dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code, rr.formula || formula, false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
     if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
     if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
     hideProgress(); setBusy(false);
   }
 
-  function dispatchOutput(res, head, code, runFormula=formula, isDetail=false) {
+  function dispatchOutput(res, head, code, runFormula=formula, isDetail=false, outputLanguage='') {
+    const entryOutputLanguage = outputLanguage || outputLanguageInstruction((head || '') + '\n' + (runFormula || ''));
     const ts = `[${now()}] ${head}`;
     if (res.error) {
       pushLog({ head: ts + ' — FAILED', error:true, text: cleanErrorMessage(res.error) });
@@ -2198,7 +2201,7 @@ ${currentCode}` });
     let displayed = false;
     if (res.resultHtml || (res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot) {
       pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: res.resultHtml || '', plot: res.plot || null,
-                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: res.resultKey || null });
+                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: res.resultKey || null, _outputLanguage: entryOutputLanguage });
       displayed = true;
     }
     if (!displayed && res.consoleText && res.consoleText.trim()) {
@@ -2212,7 +2215,7 @@ ${code || '(none)'}` });
         displayed = true;
       } else if (consoleLines <= 100) {
         pushResult({ head: ts + ' — console output', text: ctext, html:'', plot:null,
-                     _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: null });
+                     _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: null, _outputLanguage: entryOutputLanguage });
         displayed = true;
       } else {
         pushLog({ head: ts + ' — console output suppressed', text:'Console output had more than 100 lines, so it was not printed. Assign large outputs to a dataset to inspect them.' });
@@ -2236,7 +2239,8 @@ ${code || '(none)'}` });
         consoleText: res.consoleText || '',
         plot: !!res.plot,
         savedDataset: res.savedDataset || '',
-        newDataset: res.newDataset || ''
+        newDataset: res.newDataset || '',
+        outputLanguage: entryOutputLanguage
       });
     }
   }
@@ -2247,50 +2251,12 @@ ${code || '(none)'}` });
     if (!en) return;
     try {
       const resultForInterp = en.text || htmlToText(en.html) || '(plot output)';
-      const txt = await interpretResult(en._summary||'', en._code||'', resultForInterp);
+      const txt = await interpretResult(en._summary||'', en._code||'', resultForInterp, en._outputLanguage || outputLanguageInstruction(en._summary || ''));
       setResultEntries(es => es.map(e => e.id===entryId ? {...e, interp:txt, interpreting:false} : e));
     } catch(e) {
       setResultEntries(es => es.map(x => x.id===entryId ? {...x, interp:'Interpretation failed: '+(e.message||e), interpreting:false} : x));
     }
   }
-  async function onDetailsResult(entryId) {
-    const en = resultEntries.find(e=>e.id===entryId);
-    if (!en || !en._code) return;
-    setResultEntries(es => es.map(e => e.id===entryId ? {...e, detailing:true} : e));
-    setBusy(true); setParseErr(''); showProgress('Generating expanded analysis code…', 35, 'Expand 버튼은 가벼운 추가 결과만 생성합니다.');
-    try {
-      const d = await parseDetailsRequest(en);
-      setCodeText(d.code); setRestate(d.summary); setFormula(d.formula || '');
-      const rr = await runCodeWithRepair(d.code, d.summary);
-      await refreshSchema();
-      dispatchOutput(rr.res, `${d.summary || en._summary || 'Expanded analysis'} — Expand`, rr.code, rr.formula || d.formula || en._formula || '', true);
-      if (rr.repaired && !rr.res.error) setParseErr('Expand 분석 코드가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
-    } catch(e) {
-      pushLog({ head:`[${now()}] details failed`, error:true, text:e.message||String(e) });
-    }
-    setResultEntries(es => es.map(e => e.id===entryId ? {...e, detailing:false} : e));
-    hideProgress(); setBusy(false);
-  }
-
-  async function onDiagnosticsResult(entryId) {
-    const en = resultEntries.find(e=>e.id===entryId);
-    if (!en || !en._code) return;
-    setResultEntries(es => es.map(e => e.id===entryId ? {...e, diagnosing:true} : e));
-    setBusy(true); setParseErr(''); showProgress('Generating diagnostic analysis code…', 35, 'Diagnostics는 필요한 진단만 골라서 실행합니다.');
-    try {
-      const d = await parseDiagnosticsRequest(en);
-      setCodeText(d.code); setRestate(d.summary); setFormula(d.formula || '');
-      const rr = await runCodeWithRepair(d.code, d.summary);
-      await refreshSchema();
-      dispatchOutput(rr.res, `${d.summary || en._summary || 'Diagnostic analysis'} — Diagnostics`, rr.code, rr.formula || d.formula || en._formula || '', true);
-      if (rr.repaired && !rr.res.error) setParseErr('Diagnostics 분석 코드가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
-    } catch(e) {
-      pushLog({ head:`[${now()}] diagnostics failed`, error:true, text:e.message||String(e) });
-    }
-    setResultEntries(es => es.map(e => e.id===entryId ? {...e, diagnosing:false} : e));
-    hideProgress(); setBusy(false);
-  }
-
   async function onSavePdf(entryId) {
     const en = resultEntries.find(e => e.id === entryId);
     if (!en) return;
