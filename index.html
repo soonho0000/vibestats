@@ -74,8 +74,10 @@
   .window > .titlebar { height: 26px; flex: 0 0 26px; display: flex; align-items: center; gap: 7px; padding: 0 8px 0 11px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.3px; color: var(--ink-dim); user-select: none; }
   .window > .titlebar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
   .window > .titlebar .grow { flex: 1; }
-  .window > .titlebar .tbtn { font-size: 11px; color: var(--ink-faint); cursor: pointer; background: transparent; border: 1px solid var(--line-bright); border-radius: 3px; padding: 1px 6px; font-family: var(--mono); }
+  .window > .titlebar .tbtn { font-size: 10px; color: var(--ink-faint); cursor: pointer; background: transparent; border: 1px solid var(--line-bright); border-radius: 3px; padding: 1px 5px; font-family: var(--mono); line-height: 1.4; }
   .window > .titlebar .tbtn:hover { color: var(--ink); border-color: var(--accent); }
+  /* Text-label title buttons (e.g. "rcode") size to their text instead of a fixed icon box */
+  .window > .titlebar .tbtn.text-tbtn { padding: 1px 7px; width: auto; min-width: 0; flex: 0 0 auto; }
   .window > .titlebar .actbtn { font-size: 10px; color: var(--accent); cursor: pointer; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 3px; padding: 2px 9px; font-family: var(--mono); font-weight: 600; }
   .window > .titlebar .actbtn:hover { background: var(--accent); color: var(--bg); }
   .window > .content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
@@ -240,9 +242,9 @@
   }
 
 
-  .top-tools { display: flex; align-items: center; gap: 6px; }
+  .top-tools { display: flex; align-items: center; gap: 5px; }
   .icon-btn {
-    height: 24px; min-width: 28px; padding: 0 8px !important;
+    height: 22px; min-width: 26px; padding: 0 7px !important;
     display: inline-flex; align-items: center; justify-content: center; gap: 4px;
     border-radius: 999px !important; border: 1px solid var(--line-bright) !important;
     background: linear-gradient(180deg, var(--panel-2), var(--panel)) !important;
@@ -462,6 +464,15 @@
   .orange-response-card .orange-formula { margin-top:8px; padding-top:8px; border-top:1px dashed color-mix(in srgb, var(--amber) 45%, var(--line)); font-family:var(--mono); color:var(--amber); white-space:pre-wrap; }
   .orange-response-card .coach-options { margin-top:10px; }
   .entry-actions .save-pdf-btn { border-color: color-mix(in srgb, var(--amber) 55%, var(--line)) !important; color: var(--amber) !important; }
+  .result-html-wrap { position: relative; }
+  .to-dataset-btn {
+    position: absolute; top: 6px; right: 6px; z-index: 3;
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    color: var(--green); background: color-mix(in srgb, var(--green) 14%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line)); border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; line-height: 1.2;
+  }
+  .to-dataset-btn:hover { background: var(--green); color: #fff; border-color: var(--green); }
 
   .window > .titlebar .tbtn, .modal h3 .x, .modal h3 .max, .modal-edit-btn {
     width:28px !important; min-width:28px !important; height:24px !important;
@@ -496,7 +507,8 @@
     "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
     "react-dom": "https://esm.sh/react-dom@18.3.1",
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-    "webr": "https://webr.r-wasm.org/latest/webr.mjs"
+    "webr": "https://webr.r-wasm.org/latest/webr.mjs",
+    "html2canvas": "https://esm.sh/html2canvas@1.4.1"
   }
 }
 </script>
@@ -534,6 +546,7 @@ async function bootWebR() {
 async function getSchema() {
   const code = `local({
     nms <- ls(.nlstat_env); parts <- character(0)
+    nms <- nms[!grepl("^\\\\.vibestats_result_", nms)]
     jesc <- function(s) { s <- gsub('\\\\\\\\','\\\\\\\\\\\\\\\\', s); s <- gsub('"','\\\\\\\\"', s); s <- gsub('[[:cntrl:]]',' ', s); s }
     rtype <- function(col) {
       if (inherits(col,'Date')) return('date')
@@ -961,15 +974,6 @@ async function executeR(code, allowNewDatasets=false) {
   if (!is.null(result)) {
     .printed <- capture.output(print(result))
     .lineCount <- length(.printed)
-    .resultRows <- tryCatch(nrow(as.data.frame(result)), error=function(e) if (is.atomic(result)) length(result) else NA_integer_)
-    if (!is.na(.resultRows) && .resultRows > 100L) {
-      .df_save <- tryCatch(as.data.frame(result, stringsAsFactors=FALSE, check.names=FALSE), error=function(e) NULL)
-      if (!is.null(.df_save)) {
-        .nm <- .next_name("large_result")
-        assign(.nm, .df_save, envir=.env)
-        .savedNames <- c(.savedNames, .nm)
-      }
-    }
     .resultHtml <- .obj_html(result, "Result")
     if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
   }
@@ -1038,11 +1042,27 @@ async function saveStoredResultAsDataset(resultKey, requestedName) {
     key <- ${JSON.stringify(resultKey)}; nm <- ${JSON.stringify(nm)}
     if (!exists(key, envir=.env, inherits=FALSE)) stop("Saved result is no longer available.")
     x <- get(key, envir=.env)
+    .flatten_list <- function(L) {
+      dfs <- Filter(function(e) is.data.frame(e) || is.matrix(e) || is.table(e), L)
+      if (length(dfs) >= 1) {
+        sizes <- vapply(dfs, function(e) tryCatch(nrow(as.data.frame(e)), error=function(err) 0L), integer(1))
+        return(as.data.frame(dfs[[which.max(sizes)]], stringsAsFactors=FALSE, check.names=FALSE))
+      }
+      scal <- Filter(function(e) is.atomic(e) && length(e) == 1, L)
+      if (length(scal)) {
+        nmv <- names(scal); if (is.null(nmv)) nmv <- paste0("V", seq_along(scal))
+        return(data.frame(metric=nmv, value=unlist(lapply(scal, as.character)), check.names=FALSE, stringsAsFactors=FALSE))
+      }
+      NULL
+    }
     df <- NULL
     if (is.data.frame(x)) df <- x
     else if (is.matrix(x) || is.table(x)) df <- as.data.frame(x)
-    else if (is.atomic(x)) df <- data.frame(value=as.vector(x), check.names=FALSE)
-    else df <- as.data.frame(capture.output(print(x)), stringsAsFactors=FALSE)
+    else if (is.list(x)) df <- .flatten_list(x)
+    if (is.null(df)) {
+      if (is.atomic(x)) df <- data.frame(value=as.vector(x), check.names=FALSE)
+      else df <- as.data.frame(capture.output(print(x)), stringsAsFactors=FALSE)
+    }
     base <- nm; i <- 1L
     while (exists(nm, envir=.env, inherits=FALSE)) { i <- i + 1L; nm <- paste0(base, i) }
     assign(nm, df, envir=.env)
@@ -1421,10 +1441,41 @@ async function saveBlobFileDirect(defaultName, mime, blob) {
   return false;
 }
 async function saveElementAsPdf(element, defaultName='vibestats-result.pdf') {
-  const title = element.querySelector('.ehead')?.textContent?.trim() || 'Vibestats result';
-  const text = extractEntryTextForPdf(element);
-  const pdfBlob = buildTextPdfBlob(title, text);
-  await saveBlobFileDirect(defaultName, 'application/pdf', pdfBlob);
+  // Capture the result card EXACTLY as shown (Korean text included) by rasterizing the DOM,
+  // then place the image into a PDF. This avoids font/encoding breakage of text-based PDFs.
+  let html2canvas;
+  try { ({ default: html2canvas } = await import('html2canvas')); }
+  catch(e) { throw new Error('PDF renderer failed to load. Check your network connection and try again.'); }
+
+  // Clone the entry into an off-screen light-themed container so the PDF looks clean and printable.
+  const clone = element.cloneNode(true);
+  clone.querySelectorAll('.entry-actions, button').forEach(x => x.remove());
+  const rect = element.getBoundingClientRect();
+  const width = Math.max(620, Math.ceil(rect.width || 720));
+  const holder = document.createElement('div');
+  holder.className = 'pdf-export-holder';
+  holder.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;background:#ffffff;color:#111;padding:20px;font-family:${getComputedStyle(document.body).fontFamily};`;
+  holder.appendChild(clone);
+  const exportStyle = document.createElement('style');
+  exportStyle.textContent = `
+    .pdf-export-holder, .pdf-export-holder * { color:#111 !important; box-shadow:none !important; }
+    .pdf-export-holder .ehead { color:#555 !important; }
+    .pdf-export-holder .result-card, .pdf-export-holder .notice-card, .pdf-export-holder .error-card, .pdf-export-holder .orange-response-card { background:#fff !important; border:1px solid #ddd !important; }
+    .pdf-export-holder table.result-table th { background:#f2f2f2 !important; color:#111 !important; }
+    .pdf-export-holder table.result-table td { color:#111 !important; }
+    .pdf-export-holder .result-pre { background:#fafafa !important; border:1px solid #eee !important; }
+    .pdf-export-holder .interp { background:#f3faf4 !important; border:1px solid #cde9d2 !important; }
+    .pdf-export-holder img { background:#fff !important; }
+  `;
+  holder.appendChild(exportStyle);
+  document.body.appendChild(holder);
+  try {
+    const canvas = await html2canvas(holder, { backgroundColor:'#ffffff', scale: Math.min(2, window.devicePixelRatio || 1.5), useCORS:true, logging:false });
+    const pdfBlob = buildImagePdfFromCanvas(canvas);
+    await saveBlobFileDirect(defaultName, 'application/pdf', pdfBlob);
+  } finally {
+    document.body.removeChild(holder);
+  }
 }
 function styleTextForExport() {
   return Array.from(document.querySelectorAll('style')).map(x => x.textContent || '').join('\n') + `
@@ -1473,6 +1524,26 @@ async function renderElementToCanvas(element) {
     ctx.drawImage(img, 0, 0);
     return canvas;
   } finally { URL.revokeObjectURL(url); }
+}
+function buildImagePdfFromCanvas(canvas, pageW=595.28, pageH=841.89, margin=28) {
+  // Slice a tall canvas into page-sized JPEG images, then assemble a multi-page PDF.
+  const drawW = pageW - margin*2;
+  const pagePxH = Math.floor(canvas.width * (pageH - margin*2) / drawW); // canvas px per PDF page
+  const images = [];
+  if (canvas.height <= pagePxH) {
+    images.push({ dataUrl: canvas.toDataURL('image/jpeg', 0.92), width: canvas.width, height: canvas.height });
+  } else {
+    for (let y=0; y<canvas.height; y+=pagePxH) {
+      const sliceH = Math.min(pagePxH, canvas.height - y);
+      const tmp = document.createElement('canvas');
+      tmp.width = canvas.width; tmp.height = sliceH;
+      const tctx = tmp.getContext('2d');
+      tctx.fillStyle = '#ffffff'; tctx.fillRect(0,0,tmp.width,tmp.height);
+      tctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+      images.push({ dataUrl: tmp.toDataURL('image/jpeg', 0.92), width: canvas.width, height: sliceH });
+    }
+  }
+  return buildImagePdf(images, pageW, pageH, margin);
 }
 function buildImagePdf(images, pageW=595.28, pageH=841.89, margin=28) {
   const enc = new TextEncoder();
@@ -1592,7 +1663,7 @@ function useSplitter() {
   }, []);
 }
 
-function StreamPane({ entries, kind, onInterpret, onSavePdf, onCoachOption }) {
+function StreamPane({ entries, kind, onInterpret, onSavePdf, onCoachOption, onToDataset }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [entries.length]);
   if (!entries.length) return h('div', { className:'stream', ref },
@@ -1606,7 +1677,11 @@ function StreamPane({ entries, kind, onInterpret, onSavePdf, onCoachOption }) {
         h('div', null, en.coach.message),
         en.coach.options && en.coach.options.length ? h('div', { className:'coach-options' },
           en.coach.options.map((op,i)=>h('button', { key:i, onClick:()=>onCoachOption && onCoachOption(op) }, op))) : null),
-      en.html && h('div', { className:'result-html', dangerouslySetInnerHTML:{__html:en.html} }),
+      en.html && h('div', { className:'result-html result-html-wrap' },
+        kind==='result' && onToDataset && en.resultKey && !en.system && !en.error
+          ? h('button', { className:'to-dataset-btn', title:'Save this result as a dataset', onClick:()=>onToDataset(en.id) }, '⊕ To dataset')
+          : null,
+        h('div', { dangerouslySetInnerHTML:{__html:en.html} })),
       en.text && (en.system
         ? h('details', { className: en.error ? 'technical-log error-card' : 'technical-log notice-card', open: !!en.error },
             h('summary', null, en.error ? 'Error details' : 'System / Log'),
@@ -1956,9 +2031,6 @@ ${currentCode}` });
       pushLog({ head: ts + ' — FAILED', error:true, text: cleanErrorMessage(res.error) });
       return;
     }
-    if (res.savedDataset) {
-      pushLog({ head: ts + ' — large result saved', text:`Large result exceeded 100 rows and was automatically saved as dataset: ${res.savedDataset}.` });
-    }
     if (res.newDataset && res.newDataset !== res.savedDataset && !String(res.savedDataset || '').split(',').includes(res.newDataset)) {
       markDatasetKind(res.newDataset, 'created');
       pushLog({ head: ts + ' — dataset created', text:`New dataset created: '${res.newDataset}'.` });
@@ -1967,7 +2039,7 @@ ${currentCode}` });
     let displayed = false;
     if (res.resultHtml || (res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot) {
       pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: res.resultHtml || '', plot: res.plot || null,
-                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: null });
+                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: res.resultKey || null });
       displayed = true;
     }
     if (!displayed && res.consoleText && res.consoleText.trim()) {
@@ -2072,6 +2144,25 @@ ${code || '(none)'}` });
       await saveElementAsPdf(node, safeName);
     } catch(err) {
       alert('PDF export failed: ' + (err.message || err));
+    } finally {
+      hideProgress();
+    }
+  }
+
+  async function onToDataset(entryId) {
+    const en = resultEntries.find(e => e.id === entryId);
+    if (!en || !en.resultKey) { alert('This result cannot be saved as a dataset.'); return; }
+    const proposed = prompt('Enter a name for the new dataset:', 'result_dataset');
+    if (proposed === null) return;
+    try {
+      showProgress('Saving result as a dataset...', 40);
+      const finalName = await saveStoredResultAsDataset(en.resultKey, proposed);
+      await refreshSchema();
+      setNewNames(p => p.includes(finalName) ? p : [...p, finalName]);
+      markDatasetKind(finalName, 'created');
+      pushLog({ head:`[${now()}] result saved`, text:`Result saved as dataset: '${finalName}'.` });
+    } catch(err) {
+      alert('Save failed: ' + (err.message || err));
     } finally {
       hideProgress();
     }
@@ -2357,7 +2448,7 @@ ${code || '(none)'}` });
             h('button',{className:'tbtn', title:'Clear', onClick:()=>setResultEntries([])},'🧹'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Results','result')},'⛶')),
           h('div', { className:'content' },
-            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption }))),
+            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'window prompt-window', style:{flex:'0 0 185px'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'})),
@@ -2386,7 +2477,7 @@ ${code || '(none)'}` });
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
             h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — fixed order · drag down for new row'),
             h('span',{className:'grow'}),
-            h('button',{className:'tbtn', title:'Export R code', onClick:exportRCode},'rcode'),
+            h('button',{className:'tbtn text-tbtn', title:'Export R code', onClick:exportRCode},'rcode'),
             h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Blocks','blocks')},'⛶')),
           h('div', { className:'content' },
             h('div', { className:'blocks-scroll', onMouseDown:beginBlockAreaSelect, onContextMenu:e=>{ if(selectedIds.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'blocks-selected'}); } } },
@@ -2427,7 +2518,7 @@ ${code || '(none)'}` });
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
           : modal.productInfo ? h('div',{className:'mbody'}, h(ProductInfo))
-          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSavePdf: modal.streamKind==='result'?onSavePdf:null, onCoachOption:onCoachOption}))
+          : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSavePdf: modal.streamKind==='result'?onSavePdf:null, onCoachOption:onCoachOption, onToDataset: modal.streamKind==='result'?onToDataset:null}))
           : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
             h('div', { className:'ds-toolbar' },
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
