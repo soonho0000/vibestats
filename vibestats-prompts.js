@@ -3,7 +3,7 @@
 // Editing this file changes the behavior of the LLM planning/coaching layer, while index.html controls the UI and WebR runtime.
 
 // ===== LLM via secure backend proxy =====
-export const OPENAI_MODEL = 'gpt-5.4-mini';
+export const OPENAI_MODEL = 'gpt-4.1-mini';
 export const OPENAI_PROXY_URL = 'https://old-scene-66bd.hesety00.workers.dev';
 export const PROMPT_VERSION = 'planner-coach-guardrails-2026-06-27-v5';
 
