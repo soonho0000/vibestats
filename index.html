@@ -514,6 +514,68 @@
     padding:0 10px !important; white-space:nowrap !important;
   }
 
+
+
+  /* Current request UX refinements */
+  .prompt-window .nl-box { gap: 11px; }
+  .prompt-window .nl-row { align-items: stretch; }
+  .nl-input.prompt-input {
+    min-height: 82px !important;
+    height: 82px !important;
+    resize: vertical;
+    font-size: calc(15px * var(--font-scale)) !important;
+    line-height: 1.5 !important;
+    padding: 13px 15px !important;
+    border-radius: 13px !important;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, var(--panel-2)), var(--bg));
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line-bright)) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 8px 22px rgba(0,0,0,.10);
+  }
+  .nl-input.prompt-input:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .nl-input.prompt-input::placeholder { color: color-mix(in srgb, var(--ink-faint) 80%, var(--ink-dim)); }
+  .sheet-toolbar .modal-edit-btn {
+    min-width: 116px !important;
+    height: 34px !important;
+    padding: 0 18px !important;
+    font-size: calc(12.5px * var(--font-scale)) !important;
+    font-weight: 800 !important;
+    letter-spacing: .1px;
+  }
+  .sheet-toolbar .modal-edit-btn:nth-of-type(2) { min-width: 132px !important; }
+  .sheet-toolbar .modal-edit-btn:last-child { min-width: 144px !important; }
+  .sheet-toolbar input { height:34px !important; font-size:calc(12.5px * var(--font-scale)) !important; }
+
+  @media print {
+    @page { size: auto; margin: 18mm; }
+    html, body { background:#fff !important; color:#111 !important; overflow:visible !important; height:auto !important; }
+    body * { visibility:hidden !important; }
+    #printArea, #printArea * { visibility:visible !important; }
+    #printArea {
+      position:absolute; left:0; top:0; width:100%; padding:0;
+      background:#fff !important; color:#111 !important;
+      font-family:Arial, Helvetica, sans-serif !important;
+      font-size:12px !important;
+    }
+    #printArea .entry { border:0 !important; padding:0 !important; white-space:normal !important; word-break:normal !important; }
+    #printArea .entry .ehead { color:#555 !important; margin-bottom:8px !important; }
+    #printArea .entry .ehead::before { content:'' !important; }
+    #printArea .result-html { display:block !important; }
+    #printArea .result-card, #printArea .notice-card, #printArea .error-card, #printArea .orange-response-card, #printArea .result-pre, #printArea .technical-log, #printArea .interp {
+      background:#fff !important; color:#111 !important; border:1px solid #ddd !important; box-shadow:none !important;
+      break-inside: avoid; page-break-inside: avoid;
+    }
+    #printArea .result-card-title, #printArea .orange-title { color:#111 !important; }
+    #printArea .result-table-wrap { overflow:visible !important; display:block !important; border:1px solid #ddd !important; }
+    #printArea table.result-table { width:100% !important; min-width:0 !important; border-collapse:collapse !important; }
+    #printArea table.result-table th, #printArea table.result-table td { color:#111 !important; border:1px solid #ddd !important; white-space:normal !important; }
+    #printArea table.result-table th { background:#f2f2f2 !important; }
+    #printArea img { max-width:100% !important; height:auto !important; }
+    #printArea .entry-actions, #printArea button { display:none !important; }
+  }
+
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -1458,55 +1520,42 @@ async function saveBlobFileDirect(defaultName, mime, blob) {
   return false;
 }
 async function saveElementAsPdf(element, defaultName='vibestats-result.pdf') {
-  // Use the browser print engine instead of canvas/image capture.
-  // This keeps tables and text selectable/copyable in the saved PDF.
+  // Text-selectable PDF export: use the browser print engine on the CURRENT page.
+  // This avoids canvas/image-based PDFs, so tables and text remain selectable in Save as PDF output.
+  if (!element) throw new Error('Result card was not found.');
+  const old = document.getElementById('printArea');
+  if (old) old.remove();
   const clone = element.cloneNode(true);
   clone.querySelectorAll('.entry-actions, button, script, style').forEach(x => x.remove());
   clone.querySelectorAll('details').forEach(d => d.setAttribute('open', 'open'));
-  const iframe = document.createElement('iframe');
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  iframe.setAttribute('aria-hidden', 'true');
-  document.body.appendChild(iframe);
-  const doc = iframe.contentDocument || iframe.contentWindow.document;
-  const styles = Array.from(document.querySelectorAll('style')).map(st => st.textContent || '').join('\n');
-  const title = String(defaultName || 'vibestats-result.pdf').replace(/\.pdf$/i, '');
-  doc.open();
-  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escHtml(title)}</title><style>
-    ${styles}
-    @page { size: auto; margin: 18mm; }
-    html, body { background:#fff !important; color:#111 !important; overflow:visible !important; height:auto !important; }
-    body { font-family: Arial, Helvetica, sans-serif !important; font-size: 12px !important; padding:0 !important; }
-    * { box-shadow:none !important; }
-    .entry { border:0 !important; padding:0 !important; white-space:normal !important; word-break:normal !important; }
-    .entry .ehead { color:#555 !important; margin-bottom:8px !important; }
-    .entry .ehead::before { content:'' !important; }
-    .result-html { display:block !important; }
-    .result-card, .notice-card, .error-card, .orange-response-card, .result-pre, .technical-log, .interp {
-      background:#fff !important; color:#111 !important; border:1px solid #ddd !important; box-shadow:none !important;
-      break-inside: avoid; page-break-inside: avoid;
-    }
-    .result-card-title, .orange-title { color:#111 !important; }
-    .result-table-wrap { overflow:visible !important; display:block !important; border:1px solid #ddd !important; }
-    table.result-table { width:100% !important; min-width:0 !important; border-collapse:collapse !important; }
-    table.result-table th, table.result-table td { color:#111 !important; border:1px solid #ddd !important; white-space:normal !important; }
-    table.result-table th { background:#f2f2f2 !important; }
-    img { max-width:100% !important; height:auto !important; }
-    .entry-actions, button { display:none !important; }
-  </style></head><body>${clone.outerHTML}</body></html>`);
-  doc.close();
-  await new Promise(resolve => setTimeout(resolve, 150));
+
+  const printArea = document.createElement('div');
+  printArea.id = 'printArea';
+  printArea.appendChild(clone);
+  document.body.appendChild(printArea);
+
+  const oldTitle = document.title;
+  document.title = String(defaultName || 'vibestats-result.pdf').replace(/\.pdf$/i, '');
+
+  const cleanup = () => {
+    try { printArea.remove(); } catch(e) {}
+    document.title = oldTitle;
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+
+  await new Promise(resolve => setTimeout(resolve, 80));
   try {
-    iframe.contentWindow.focus();
-    iframe.contentWindow.print();
-  } finally {
-    setTimeout(() => { try { document.body.removeChild(iframe); } catch(e) {} }, 1200);
+    window.focus();
+    window.print();
+  } catch (e) {
+    cleanup();
+    throw e;
   }
+  // Some browsers do not reliably fire afterprint after Save as PDF/cancel.
+  setTimeout(cleanup, 3000);
 }
+
 function styleTextForExport() {
   return Array.from(document.querySelectorAll('style')).map(x => x.textContent || '').join('\n') + `
     body{background:#fff;color:#111;overflow:visible;font-family:Arial,sans-serif;}
@@ -2481,7 +2530,7 @@ ${code || '(none)'}` });
           h('div', { className:'content' },
             h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
-        h('div', { className:'window prompt-window', style:{flex:'0 0 185px'} },
+        h('div', { className:'window prompt-window', style:{flex:'0 0 245px'} },
           h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'})),
           h('div', { className:'content', style:{overflow:'auto'} },
             h('div', { className:'nl-box' },
@@ -2494,8 +2543,8 @@ ${code || '(none)'}` });
                   h('button', { className:'active-clear', onClick:clearActiveDatasets, title:'Clear active datasets' }, 'clear'))
                   : 'No active dataset selected. Click one or more datasets on the left to focus prompts.'),
               h('div', { className:'nl-row' },
-                h('input', { className:'nl-input', ref:promptRef, placeholder:'Enter prompt',
-                  onKeyDown:e=>{ if(e.key==='Enter') onAnalyzePrompt(); } }),
+                h('textarea', { className:'nl-input prompt-input', ref:promptRef, placeholder:'Enter prompt', rows:3,
+                  onKeyDown:e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onAnalyzePrompt(); } } }),
                 h('div', { className:'nl-actions' },
                   h('button', { className:'nl-go action-btn primary analyze-btn', onClick:onAnalyzePrompt, disabled:busy }, busy?'…':h(React.Fragment,null,h('span',{className:'ico'},'✦'),h('span',null,'Analyze'))),
                   h('button', { className:'nl-go action-btn rcode-btn', onClick:onRCodePrompt, disabled:busy, title:'Generate R code without running' }, 'Rcode'))),
