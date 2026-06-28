@@ -952,24 +952,36 @@ Language rule: interpret using ONLY the Output language above. Do not infer the 
 }
 
 async function executeR(code, allowNewDatasets=false) {
+  // Important design rule:
+  // Run code in the real Vibestats R environment (.nlstat_env), not in a hidden
+  // temporary environment. This makes R Code behavior match normal R semantics:
+  // assignments create objects, existing datasets can be modified, and data.frames
+  // appear in the Datasets panel because they really exist in the R environment.
+  // For AI-generated ordinary analyses, the SYSTEM_PROMPT asks the model to use
+  // result <- local({ ... }) so intermediate analysis objects do not leak globally.
   const before = new Set(Object.keys(window._dsCache || {}));
   const rLiteral = JSON.stringify(code);
   const resultKey = '.vibestats_result_' + Date.now() + '_' + Math.floor(Math.random()*100000);
   const wrap = `
 .vibestats_run <- function() {
-  .env <- .nlstat_env; .run_env <- new.env(parent=.env); result <- NULL
+  .env <- .nlstat_env
+  .code <- ${rLiteral}
+  .sets_result <- grepl('result[[:space:]]*(<-|=)', .code)
   .plotfile <- "/tmp/__vibestats_plot.png"
   if (file.exists(.plotfile)) file.remove(.plotfile)
   grDevices::png(.plotfile, width=720, height=480, res=96)
+  .eval_out <- NULL
   .console <- capture.output({
-    .eval_out <- withVisible(eval(parse(text=${rLiteral}), envir=.run_env))
-    if (exists("result", envir=.run_env, inherits=FALSE)) result <- get("result", envir=.run_env)
-    else if (isTRUE(.eval_out$visible)) result <- .eval_out$value
+    .eval_out <- withVisible(eval(parse(text=.code), envir=.env))
   })
   try(grDevices::dev.off(), silent=TRUE)
-  if (exists("result", envir=.run_env, inherits=FALSE)) { result <- get("result", envir=.run_env); rm("result", envir=.run_env) }
+  result <- NULL
+  if (isTRUE(.sets_result) && exists("result", envir=.env, inherits=FALSE)) {
+    result <- get("result", envir=.env, inherits=FALSE)
+  } else if (!is.null(.eval_out) && isTRUE(.eval_out$visible)) {
+    result <- .eval_out$value
+  }
   .resultText <- ""; .resultHtml <- ""; .consoleText <- paste(.console, collapse="\\n"); .savedNames <- character(0); .resultKey <- ""
-  .next_name <- function(prefix) { n <- prefix; i <- 1L; while (exists(n, envir=.env, inherits=FALSE)) { i <- i + 1L; n <- paste0(prefix, i) }; n }
   .esc_html <- function(x) {
     x <- as.character(x); x[is.na(x)] <- ""
     x <- gsub("&", "&amp;", x, fixed=TRUE)
@@ -1000,14 +1012,15 @@ async function executeR(code, allowNewDatasets=false) {
     as.character(x)
   }
   .large_html <- function(d, title="Result") {
-    nr <- tryCatch(nrow(as.data.frame(d)), error=function(e) length(d))
-    nc <- tryCatch(ncol(as.data.frame(d)), error=function(e) 1L)
-    paste0("<section class='notice-card'><b>", .esc_html(title), "</b><br>Large result hidden: ", nr, " rows × ", nc, " columns. Use Pdf if you want to export the visible results.</section>")
+    d <- as.data.frame(d, stringsAsFactors=FALSE, check.names=FALSE)
+    nr <- nrow(d); nc <- ncol(d)
+    paste0("<section class='notice-card'><b>", .esc_html(title), "</b><br>Large result: ", nr, " rows × ", nc, " columns. Showing a compact preview only; use the Datasets panel for full data.</section>")
   }
   .table_html <- function(d, title="Result") {
     d <- as.data.frame(d, stringsAsFactors=FALSE, check.names=FALSE)
-    if (nrow(d) > 100L) return(.large_html(d, title))
-    if (ncol(d) == 0L) return("")
+    notice <- ""
+    if (nrow(d) > 100L) { notice <- .large_html(d, title); d <- utils::head(d, 20L) }
+    if (ncol(d) == 0L) return(notice)
     dd <- d
     for (j in seq_along(dd)) dd[[j]] <- .fmt(dd[[j]])
     rn <- rownames(d)
@@ -1022,7 +1035,7 @@ async function executeR(code, allowNewDatasets=false) {
         paste0("<tr>", paste0("<td>", vals, "</td>", collapse=""), "</tr>")
       }, character(1))
     }
-    paste0("<section class='result-card'><div class='result-card-title'>", .esc_html(title), "</div><div class='result-table-wrap'><table class='result-table'><thead><tr>", th, "</tr></thead><tbody>", paste(rows, collapse=""), "</tbody></table></div></section>")
+    paste0(notice, "<section class='result-card'><div class='result-card-title'>", .esc_html(title), "</div><div class='result-table-wrap'><table class='result-table'><thead><tr>", th, "</tr></thead><tbody>", paste(rows, collapse=""), "</tbody></table></div></section>")
   }
   .scalar_html <- function(x, title="Result") {
     val <- paste(.esc_html(capture.output(print(x))), collapse="<br>")
@@ -1032,7 +1045,7 @@ async function executeR(code, allowNewDatasets=false) {
     if (is.data.frame(x)) return(.table_html(x, title))
     if (is.matrix(x) || is.table(x)) return(.table_html(as.data.frame(x), title))
     if (is.atomic(x) && length(x) > 1L && length(x) <= 100L) return(.table_html(data.frame(value=x, check.names=FALSE), title))
-    if (is.atomic(x) && length(x) > 100L) return(.large_html(data.frame(value=as.vector(x), check.names=FALSE), title))
+    if (is.atomic(x) && length(x) > 100L) return(.table_html(data.frame(value=as.vector(x), check.names=FALSE), title))
     if (is.list(x) && !inherits(x, "lm") && !inherits(x, "glm") && depth < 2L) {
       nms <- names(x); if (is.null(nms)) nms <- paste0("Item ", seq_along(x)); nms[nms==""] <- paste0("Item ", which(nms==""))
       parts <- character(0)
@@ -1047,38 +1060,6 @@ async function executeR(code, allowNewDatasets=false) {
     .lineCount <- length(.printed)
     .resultHtml <- .obj_html(result, "Result")
     if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
-  }
-  .allow_new_datasets <- ${allowNewDatasets ? 'TRUE' : 'FALSE'}
-  if (isTRUE(.allow_new_datasets)) {
-    .created_names <- setdiff(ls(.run_env, all.names=FALSE), c('result'))
-    .created_names <- .created_names[!grepl('^\\\\.', .created_names)]
-    .df_names <- character(0)
-    for (.nm in .created_names) {
-      .obj <- tryCatch(get(.nm, envir=.run_env, inherits=FALSE), error=function(e) NULL)
-      if (is.data.frame(.obj)) .df_names <- c(.df_names, .nm)
-    }
-    .save_marker <- ""
-    if (exists(".vibestats_save_dataset", envir=.run_env, inherits=FALSE)) {
-      .save_marker <- tryCatch(as.character(get(".vibestats_save_dataset", envir=.run_env, inherits=FALSE))[1], error=function(e) "")
-    }
-    .candidate_names <- character(0)
-    if (nzchar(.save_marker) && .save_marker %in% .df_names) {
-      .candidate_names <- .save_marker
-    } else {
-      .temp_names <- c("d", "df", "data", "dat", "tmp", "temp", "merged", "m", "s", "ct", "fit", "model", "summary_table", "anova_table", "coef_table")
-      .usable <- setdiff(.df_names, .temp_names)
-      .preferred <- grep("(result|return|returns|ret|new|output|final|dataset|data)", .usable, ignore.case=TRUE, value=TRUE)
-      if (length(.preferred) >= 1L) .candidate_names <- tail(.preferred, 1L)
-      else if (length(.usable) == 1L) .candidate_names <- .usable
-      else if (length(.df_names) == 1L) .candidate_names <- .df_names
-    }
-    for (.nm in unique(.candidate_names)) {
-      .obj <- tryCatch(get(.nm, envir=.run_env, inherits=FALSE), error=function(e) NULL)
-      if (is.data.frame(.obj)) {
-        assign(.nm, .obj, envir=.env)
-        .savedNames <- unique(c(.savedNames, .nm))
-      }
-    }
   }
   paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__SAVED__", paste(.savedNames, collapse=","), "__RKEY__", .resultKey)
 }
@@ -1111,20 +1092,11 @@ async function executeR(code, allowNewDatasets=false) {
     }
     let plot = null;
     try { const buf = await webR.FS.readFile('/tmp/__vibestats_plot.png');
-      if (buf && buf.length>300) { let bin=''; for(let i=0;i<buf.length;i++) bin+=String.fromCharCode(buf[i]);
+      if (buf && buf.length>200) { let bin=''; for(let i=0;i<buf.length;i++) bin+=String.fromCharCode(buf[i]);
         plot='data:image/png;base64,'+btoa(bin); await webR.FS.unlink('/tmp/__vibestats_plot.png').catch(()=>{}); } } catch(e){}
     await getSchema();
     let after = Object.keys(window._dsCache||{});
     let newOnes = after.filter(n=>!before.has(n));
-    const savedSet = new Set(String(savedDataset || '').split(',').map(x=>x.trim()).filter(Boolean));
-    const removedNewOnes = newOnes.filter(n => !savedSet.has(n));
-    if (removedNewOnes.length && !allowNewDatasets) {
-      try {
-        await webR.evalRVoid(`rm(list=${JSON.stringify(removedNewOnes)}, envir=.nlstat_env)`);
-        await getSchema();
-      } catch(e) {}
-      newOnes = newOnes.filter(n => savedSet.has(n));
-    }
     const hasDisplay = !!(resultHtml || (resultText && resultText.trim()) || (consoleText && consoleText.trim()) || plot);
     if (!hasDisplay) {
       resultHtml = '';
@@ -2015,12 +1987,13 @@ function App() {
   }
 
   function shouldAllowDatasetCreation(intentText='') {
-    return /(create|save|store|new\s+dataset|make\s+dataset|filter|filtered|merge|join|append|bind|reshape|transform|mutate|subset|clean\s+dataset|derive\s+dataset|데이터셋\s*(생성|만들|저장)|새\s*데이터|필터|병합|합치|변환|가공|저장)/i.test(String(intentText || ''));
+    return /(create|save|store|overwrite|replace|update|modify|convert|recode|rename|new\s+dataset|make\s+dataset|filter|filtered|merge|join|append|bind|reshape|transform|mutate|subset|clean\s+dataset|derive\s+dataset|데이터셋\s*(생성|만들|저장|수정|변경)|새\s*데이터|필터|병합|합치|변환|가공|저장|수정|변경|덮어쓰기|숫자형|문자형|범주형|날짜형|결측치|제거|정리)/i.test(String(intentText || ''));
   }
 
   function shouldAllowDirectRDatasetSave(code='') {
     const txt = String(code || '');
     if (!txt.trim()) return false;
+    if (/\.vibestats_save_dataset\s*<-|\.vibestats_save_dataset\s*=/.test(txt)) return true;
     const blocked = new Set(['result','m','s','ct','fit','model','tmp','temp','d','df','data','dat','summary_table','anova_table','coef_table']);
     const lines = txt.split(/\r?\n/).map(x => x.replace(/#.*$/, '').trim()).filter(Boolean);
     for (const line of lines) {
