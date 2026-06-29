@@ -488,6 +488,32 @@
   .modal .rcode-pane { height:100%; width:100%; }
   .modal .rcode-textarea { font-size:14px; line-height:1.58; padding:14px 16px; min-height:0; }
   .modal.rcode-modal .mbody { padding:0 !important; display:flex; min-height:0; }
+
+
+  /* R code editor line numbers */
+  .rcode-editor-wrap {
+    flex: 1; min-height: 0; width: 100%; display: flex; align-items: stretch;
+    background: var(--bg); overflow: hidden;
+  }
+  .rcode-line-nums {
+    flex: 0 0 44px; min-width: 44px; max-width: 44px;
+    padding: 11px 8px 11px 0;
+    background: color-mix(in srgb, var(--panel-2) 32%, var(--bg));
+    border-right: 1px solid var(--line);
+    color: var(--ink-faint);
+    font-family: var(--mono); font-size: 13px; line-height: 1.5;
+    text-align: right; white-space: pre; user-select: none; pointer-events: none;
+    overflow: hidden; tab-size: 2;
+  }
+  .rcode-editor-wrap .rcode-textarea {
+    flex: 1; min-width: 0; height: 100%;
+    padding-left: 12px !important;
+  }
+  .modal .rcode-line-nums {
+    flex-basis: 52px; min-width: 52px; max-width: 52px;
+    padding: 14px 9px 14px 0; font-size: 14px; line-height: 1.58;
+  }
+  .modal .rcode-editor-wrap .rcode-textarea { padding-left: 14px !important; }
   @media print {
     body { overflow: visible !important; background:#fff !important; color:#000 !important; }
     body * { visibility:hidden !important; }
@@ -2791,11 +2817,24 @@ ${code || '(none)'}` });
         h('button', { className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane') }, '⛶')));
   }
 
+  function rcodeLineNumbers(text) {
+    const n = Math.max(1, String(text || '').split('\n').length);
+    return Array.from({length:n}, (_,i)=>String(i+1)).join('\n');
+  }
+
+  function syncRCodeLineScroll(e) {
+    const nums = e.currentTarget && e.currentTarget.previousSibling;
+    if (nums) nums.scrollTop = e.currentTarget.scrollTop;
+  }
+
   function renderRCodeEditor(full=false, showTabs=true) {
     return h('div', { className:'rcode-pane' },
       showTabs && renderCodeTabs(),
       full && h('div', { className:'code-editor-hint' }, h('b', null, activeCodeTabObj.name || 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · Save stores the code as a Block'),
-      h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'Write R code here.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) }));
+      h('div', { className:'rcode-editor-wrap' },
+        h('div', { className:'rcode-line-nums', 'aria-hidden':'true' }, rcodeLineNumbers(codeText)),
+        h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'Write R code here.', spellCheck:false, onKeyDown:handleCodeKeyDown, onScroll:syncRCodeLineScroll, onChange:e=>setCodeText(e.target.value) })
+      ));
   }
 
   function renderRCodePane() {
