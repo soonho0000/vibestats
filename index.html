@@ -500,21 +500,22 @@
   /* R Code tabs, prompt/code switch, and terminal view */
   .code-tabs {
     flex:0 0 auto; display:flex; align-items:flex-end; gap:0;
-    padding:2px 8px 0; border-bottom:1px solid var(--line);
+    padding:4px 8px 0; border-bottom:1px solid var(--line);
     background:color-mix(in srgb, var(--panel-2) 46%, var(--bg)); overflow-x:auto;
   }
   .code-tabs .grow { flex:1; min-width:8px; }
   .tab-control-btn {
-    height:24px !important; min-width:34px !important; padding:0 9px !important;
-    margin:0 0 5px 7px !important; border-radius:999px !important;
+    height:24px !important; min-width:28px !important; padding:0 8px !important;
+    margin:0 0 3px 6px !important; border-radius:5px !important;
     border:1px solid var(--line-bright) !important;
     background:linear-gradient(180deg, var(--panel-2), var(--panel)) !important;
     color:var(--ink-dim) !important; font-family:var(--mono) !important;
-    font-size:11px !important; font-weight:700 !important; line-height:1 !important;
+    font-size:10px !important; font-weight:700 !important; line-height:1 !important;
     display:inline-flex !important; align-items:center !important; justify-content:center !important;
     cursor:pointer; box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 1px 4px rgba(0,0,0,.12);
   }
-  .tab-control-btn:hover { color:var(--accent) !important; border-color:var(--accent) !important; transform:translateY(-1px); }
+  .tab-control-btn:hover { color:var(--accent) !important; border-color:var(--accent) !important; background:var(--accent-dim) !important; transform:none; }
+  .tab-add-btn { min-width:28px !important; width:28px !important; }
   .tab-save-btn { min-width:58px !important; }
   .code-tab {
     position:relative; display:inline-flex; align-items:center; gap:6px;
@@ -532,6 +533,16 @@
   .code-tab.saved .code-tab-label::after { content:' ✓'; color:var(--green); }
   .code-tab-x { width:16px; height:16px; min-width:16px; padding:0; border:1px solid transparent; border-radius:999px; background:transparent; color:var(--ink-faint); font-family:var(--mono); font-size:11px; line-height:1; cursor:pointer; }
   .code-tab-x:hover { color:#fff; background:var(--red); border-color:var(--red); }
+  .prompt-code-switch-gutter { position:relative; flex:0 0 13px !important; overflow:visible; }
+  .prompt-code-switch-btn {
+    position:absolute; left:50%; top:50%; transform:translate(-50%, -50%); z-index:15;
+    width:24px; height:24px; border-radius:999px; border:1px solid var(--line-bright);
+    background:linear-gradient(180deg, var(--panel-2), var(--panel)); color:var(--accent);
+    font-family:var(--mono); font-size:14px; font-weight:800; line-height:1;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    box-shadow:0 4px 12px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .prompt-code-switch-btn:hover { border-color:var(--accent); background:var(--accent-dim); color:var(--ink); }
   .terminal-pre { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--line); border-left:4px solid var(--green); border-radius:8px; padding:10px 12px; color:var(--ink); font-family:var(--mono); }
   .terminal-pre.err { border-left-color:var(--red); }
   .titlebar .tbtn.active { color:var(--accent) !important; border-color:var(--accent) !important; background:var(--accent-dim) !important; }
@@ -1962,7 +1973,7 @@ function App() {
   const [blocks, setBlocks] = useState([]);
   const [codeTabs, setCodeTabs] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v3') || 'null');
+      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v4') || 'null');
       if (saved && Array.isArray(saved.tabs) && saved.tabs.length) {
         return saved.tabs.slice(0, 5).map((t, i) => ({
           id: t.id || ('code' + (i + 1)),
@@ -1976,7 +1987,7 @@ function App() {
   });
   const [activeCodeTab, setActiveCodeTab] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v3') || 'null');
+      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v4') || 'null');
       return saved?.active || 'code1';
     } catch(e) { return 'code1'; }
   });
@@ -2035,8 +2046,11 @@ function App() {
     setActiveCodeTab(id);
   }
   function saveActiveCodeTab() {
+    const tab = codeTabs.find(t => t.id === activeCodeTab) || activeCodeTabObj;
+    const code = String(tab?.code || '').trim();
+    if (!code) { alert('This R code tab is blank. There is nothing to save as a Block.'); return; }
+    saveCodeTabAsBlock(tab);
     setCodeTabs(tabs => tabs.map(t => t.id === activeCodeTab ? { ...t, savedCode:t.code || '' } : t));
-    pushLog({ head:`[${now()}] R code saved`, text:`Saved ${activeCodeTabObj.name || 'active tab'} in this browser.` });
   }
   function saveCodeTabAsBlock(tab) {
     const code = String(tab?.code || '').trim();
@@ -2089,7 +2103,7 @@ function App() {
   useEffect(() => { document.documentElement.style.setProperty('--font-scale', String(fontScale)); document.body.style.setProperty('--font-scale', String(fontScale)); localStorage.setItem('vibestats_font_scale', String(fontScale)); }, [fontScale]);
   useEffect(() => {
     if (!codeTabs.find(t => t.id === activeCodeTab) && codeTabs[0]) setActiveCodeTab(codeTabs[0].id);
-    localStorage.setItem('vibestats_code_tabs_v3', JSON.stringify({ tabs:codeTabs, active:activeCodeTab }));
+    localStorage.setItem('vibestats_code_tabs_v4', JSON.stringify({ tabs:codeTabs, active:activeCodeTab }));
   }, [codeTabs, activeCodeTab]);
   function toggleTheme() { setThemeMode(m => m === 'light' ? 'dark' : 'light'); }
   function increaseFont() { setFontScale(v => Math.min(1.45, Math.round((v + 0.08) * 100) / 100)); }
@@ -2742,8 +2756,7 @@ ${code || '(none)'}` });
 
   function renderPromptPane() {
     return h('div', { className:'window prompt-window', style:{flex:'1 1 48%'} },
-      h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'}),
-        h('button', { className:'tbtn text-tbtn', title:'Switch Prompt and R Code positions', onClick:()=>setPromptCodeSwapped(v=>!v) }, 'Switch')),
+      h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'})),
       h('div', { className:'content', style:{overflow:'auto'} },
         h('div', { className:'nl-box' },
           h('div', { className:'nl-row' },
@@ -2755,26 +2768,30 @@ ${code || '(none)'}` });
           parseErr && h('div', { className:'parse-err' }, parseErr))));
   }
 
-  function renderRCodeEditor(full=false) {
+  function renderCodeTabs() {
+    return h('div', { className:'code-tabs' },
+      codeTabs.map(t => h('button', { key:t.id, className:'code-tab' + (t.id === activeCodeTab ? ' active' : '') + ((t.savedCode || '') === (t.code || '') && (t.code || '').trim() ? ' saved' : ''), title:t.name, onClick:()=>setActiveCodeTab(t.id) },
+        h('span', { className:'code-tab-label' }, t.name),
+        h('span', { className:'code-tab-x', role:'button', title:'Close this R code tab', onClick:e=>{ e.preventDefault(); e.stopPropagation(); closeCodeTab(t.id); } }, '×'))),
+      h('button', { className:'tab-control-btn tab-add-btn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
+      h('span', { className:'grow' }),
+      h('button', { className:'tab-control-btn tab-save-btn', onClick:saveActiveCodeTab, title:'Save the active R code tab as a Block' }, 'Save'));
+  }
+
+  function renderRCodeEditor(full=false, showTabs=true) {
     return h('div', { className:'rcode-pane' },
-      h('div', { className:'code-tabs' },
-        codeTabs.map(t => h('button', { key:t.id, className:'code-tab' + (t.id === activeCodeTab ? ' active' : '') + ((t.savedCode || '') === (t.code || '') && (t.code || '').trim() ? ' saved' : ''), title:t.name, onClick:()=>setActiveCodeTab(t.id) },
-          h('span', { className:'code-tab-label' }, t.name),
-          h('span', { className:'code-tab-x', role:'button', title:'Close this R code tab', onClick:e=>{ e.preventDefault(); e.stopPropagation(); closeCodeTab(t.id); } }, '×'))),
-        h('button', { className:'tab-control-btn tab-add-btn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
-        h('span', { className:'grow' }),
-        h('button', { className:'tab-control-btn tab-save-btn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save')),
-      full && h('div', { className:'code-editor-hint' }, h('b', null, activeCodeTabObj.name || 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · code is saved to Blocks when run'),
-      h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) }));
+      showTabs && renderCodeTabs(),
+      full && h('div', { className:'code-editor-hint' }, h('b', null, activeCodeTabObj.name || 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · Save stores the code as a Block'),
+      h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'Write R code here.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) }));
   }
 
   function renderRCodePane() {
     return h('div', { className:'window', style:{flex:'1 1 52%'} },
+      renderCodeTabs(),
       h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'R Code', h('span',{className:'grow'}),
-        h('button', { className:'tbtn text-tbtn', title:'Switch Prompt and R Code positions', onClick:()=>setPromptCodeSwapped(v=>!v) }, 'Switch'),
         h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
         h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane')},'⛶')),
-      h('div', { className:'content' }, renderRCodeEditor(false)));
+      h('div', { className:'content' }, renderRCodeEditor(false, false)));
   }
 
   function renderTerminalPane() {
@@ -2855,7 +2872,8 @@ ${code || '(none)'}` });
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
         h('div', { className:'hsplit', style:{flex:'0 0 260px'} },
           lowerLeftPane,
-          h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
+          h('div', { className:'gutter col prompt-code-switch-gutter', onMouseDown:e=>onSplit(e,'h','next') },
+            h('button', { className:'prompt-code-switch-btn', title:'Switch Prompt and R Code positions', onMouseDown:e=>{ e.preventDefault(); e.stopPropagation(); }, onClick:e=>{ e.preventDefault(); e.stopPropagation(); setPromptCodeSwapped(v=>!v); } }, '⇄')),
           lowerRightPane)) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
