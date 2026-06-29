@@ -666,7 +666,7 @@ async function getSchema() {
 // Prompt/config is separated from the UI so the LLM behavior can be maintained independently.
 // Prompt caching is still provider-side: the important part is that stable system prompts remain the first messages.
 import {
-  OPENAI_MODEL, OPENAI_PROXY_URL, PROMPT_VERSION, METHOD_REQUIREMENTS,
+  GEMINI_MODEL, GEMINI_PROXY_URL, PROMPT_VERSION, METHOD_REQUIREMENTS,
   SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, INTERPRET_SYSTEM_PROMPT,
   SEND_SCHEMA_SAMPLES, SHORT_CONTEXT_CHARS, INTERPRET_RESULT_CHARS, MAX_LLM_CHARS
 } from './vibestats-prompts.js';
@@ -740,7 +740,7 @@ function namesMentioned(text, candidates) {
   return (candidates || []).filter(c => new RegExp('(^|[^A-Za-z0-9_.])' + escapeRegExp(c).toLowerCase() + '([^A-Za-z0-9_.]|$)').test(t));
 }
 function likelyWeightColumns(cols) {
-  return (cols || []).filter(c => /^(w|wt|weight|weights|freq|frequency|가중치)$/i.test(c));
+  return (cols || []).filter(c => /^(w|wt|weight|weights|freq|frequency)$/i.test(c));
 }
 function detectMethodRequirementIssue(text, schema, activeDatasets) {
   const t = String(text || '');
@@ -760,7 +760,7 @@ function detectMethodRequirementIssue(text, schema, activeDatasets) {
     if (!rule.pattern.test(t)) continue;
     if (rule.id === 'wls') {
       const wcols = likelyWeightColumns(cols);
-      const mentionedWeight = mentionedCols.some(c => /^(w|wt|weight|weights|freq|frequency|가중치)$/i.test(c)) || /weights?\s*=|가중치.*(사용|으로)/i.test(t);
+      const mentionedWeight = mentionedCols.some(c => /^(w|wt|weight|weights|freq|frequency)$/i.test(c)) || /weights?\s*=|use\s+.+\s+as\s+(a\s+)?weight|weight\s+variable/i.test(t);
       if (!mentionedWeight) {
         const opts = ['Run ordinary OLS instead'];
         if (wcols[0]) opts.push(`Use ${wcols[0]} as the weight variable`);
@@ -768,21 +768,21 @@ function detectMethodRequirementIssue(text, schema, activeDatasets) {
         return { message:'WLS regression requires a weight variable. Which weight should be used?', options:opts.slice(0,3), summary:'Missing WLS weight variable' };
       }
     } else if (rule.id === 'iv') {
-      if (!/(instrument|도구변수|using\s+.+\s+as\s+instrument|as\s+an\s+instrument)/i.test(t)) {
+      if (!/(instrument|instrumental\s+variable|using\s+.+\s+as\s+instrument|as\s+an\s+instrument)/i.test(t)) {
         return { message:'IV/2SLS regression needs an endogenous variable and an instrument variable. Which variable is endogenous, and which variable should be used as the instrument?', options:['I will specify endogenous and instrument variables','Run ordinary OLS instead','Explain IV requirements'], summary:'Missing IV specification' };
       }
     } else if (rule.id === 'panel') {
-      const hasId = /(id|firm|company|person|unit|entity|개체|기업|회사)/i.test(t);
-      const hasTime = /(time|date|year|month|quarter|period|시점|연도|날짜|월|분기)/i.test(t);
+      const hasId = /(id|firm|company|person|unit|entity|subject|individual)/i.test(t);
+      const hasTime = /(time|date|year|month|quarter|period|day|week)/i.test(t);
       if (!(hasId && hasTime)) {
         return { message:'Panel models need both a unit/id variable and a time variable. Which columns identify the unit and time?', options:['I will specify id and time variables','Run pooled OLS instead','Explain panel requirements'], summary:'Missing panel id/time variables' };
       }
     } else if (rule.id === 'did') {
-      if (!/(treat|treated|control|post|after|before|처치|대조|이후|이전)/i.test(t)) {
+      if (!/(treat|treated|control|post|after|before|intervention|policy)/i.test(t)) {
         return { message:'Difference-in-differences needs a treatment/group variable and a post/time variable. Which variables define treatment and post period?', options:['I will specify treatment and post variables','Run a simple group comparison instead','Explain DID requirements'], summary:'Missing DID variables' };
       }
     } else if (rule.id === 'survival') {
-      if (!/(event|status|death|failure|censor|time|duration|이벤트|사건|생존시간|기간)/i.test(t)) {
+      if (!/(event|status|death|failure|censor|time|duration|survival|follow[-\s]?up)/i.test(t)) {
         return { message:'Survival analysis needs a time/duration variable and an event indicator. Which columns should be used?', options:['I will specify time and event variables','Run a descriptive summary instead','Explain survival requirements'], summary:'Missing survival time/event variables' };
       }
     }
@@ -791,7 +791,7 @@ function detectMethodRequirementIssue(text, schema, activeDatasets) {
 }
 
 function looksLikeFollowUp(text) {
-  return /(더\s*(자세|상세|많이|깊게)|자세한|상세한|추가|진단|해석|보고서|좀\s*더|more detailed|more detail|expand|deeper|diagnostic|explain more|full result)/i.test(text || '');
+  return /(more detailed|more detail|expand|deeper|diagnostic|diagnostics|residual|residuals|interpret|explain more|full result|report|additional|follow[-\s]?up)/i.test(text || '');
 }
 function normalizeLLMContent(x) {
   if (typeof x === 'string') return x;
@@ -833,6 +833,20 @@ function parseLLMJson(raw, label='LLM') {
     throw new Error('Please enter the dataset name, variable names, and task instructions in more detail.');
   }
 }
+function toGeminiContents(messages) {
+  const systemText = messages
+    .filter(m => m.role === 'system' && m.content)
+    .map(m => m.content)
+    .join('\n\n');
+  const contents = messages
+    .filter(m => m.role !== 'system' && m.content)
+    .map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: String(m.content || '') }]
+    }));
+  return { systemText, contents };
+}
+
 async function callLLM(messages, jsonMode) {
   // Client-side guard: cap total payload so a runaway prompt cannot blow up tokens/cost.
   const totalChars = messages.reduce((sum, m) => sum + (m.content ? m.content.length : 0), 0);
@@ -841,13 +855,23 @@ async function callLLM(messages, jsonMode) {
       ? { ...m, content: m.content.slice(0, Math.floor(MAX_LLM_CHARS * 0.75)) + '\n…(truncated)' }
       : m);
   }
-  const body = { model:OPENAI_MODEL, messages };
-  if (jsonMode) body.response_format = { type:'json_object' };
+
+  const { systemText, contents } = toGeminiContents(messages);
+  const body = {
+    provider: 'gemini',
+    model: GEMINI_MODEL,
+    contents,
+    systemInstruction: systemText ? { parts: [{ text: systemText }] } : undefined,
+    generationConfig: jsonMode
+      ? { responseMimeType: 'application/json', temperature: 0.1 }
+      : { temperature: 0.2 }
+  };
+
   const ctrl = new AbortController();
   const timer = setTimeout(()=>ctrl.abort(), 60000);
   let resp;
   try {
-    resp = await fetch(OPENAI_PROXY_URL, {
+    resp = await fetch(GEMINI_PROXY_URL, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), signal: ctrl.signal
     });
   } finally { clearTimeout(timer); }
@@ -857,9 +881,14 @@ async function callLLM(messages, jsonMode) {
     throw new Error('LLM request failed (' + resp.status + '). ' + errText.slice(0, 200));
   }
   const data = await resp.json();
-  const cached = data?.usage?.prompt_tokens_details?.cached_tokens ?? data?.usage?.input_tokens_details?.cached_tokens;
-  if (typeof cached === 'number') console.debug('[Vibestats] cached prompt tokens:', cached, 'usage:', data.usage, 'promptVersion:', PROMPT_VERSION);
-  const content = data?.choices?.[0]?.message?.content ?? data?.output_text ?? data?.content ?? data?.message ?? '';
+  const promptTokens = data?.usageMetadata?.promptTokenCount ?? data?.usage?.prompt_tokens;
+  if (typeof promptTokens === 'number') console.debug('[Vibestats] Gemini usage:', data.usageMetadata || data.usage, 'promptVersion:', PROMPT_VERSION);
+  const content = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('')
+    ?? data?.choices?.[0]?.message?.content
+    ?? data?.output_text
+    ?? data?.content
+    ?? data?.message
+    ?? '';
   return normalizeLLMContent(content);
 }
 async function parseNL(text, lastContext=null, selectedScope=[], clarificationContext=null) {
@@ -1402,7 +1431,7 @@ function isDataReferenceError(msg) {
     || /unknown column|can't subset columns|select.*column/i.test(m);
 }
 function dataReferenceMessage(msg) {
-  return '데이터셋을 지정하거나 변수명을 올바르게 지정해 주세요.\n\n' + cleanErrorMessage(msg);
+  return 'Please specify the dataset or correct variable names.\n\n' + cleanErrorMessage(msg);
 }
 
 function now() { return new Date().toLocaleTimeString('en-US', {hour12:false}); }
@@ -1432,7 +1461,7 @@ function outputLanguageInstruction() {
 function uiTextForLanguage(key) {
   const lang = detectUserLanguage();
   const dict = {
-    ko: { plan:'분석 계획', prepared:'분석 코드가 준비되었습니다.', need:'추가 정보가 필요합니다', coach:'Vibestats 코치', interpreting:'해석 중…' },
+    ko: { plan:'Analysis plan', prepared:'Analysis code is ready.', need:'More information needed', coach:'Vibestats coach', interpreting:'Interpreting…' },
     ja: { plan:'分析計画', prepared:'分析コードを準備しました。', need:'追加情報が必要です', coach:'Vibestats coach', interpreting:'解釈中…' },
     zh: { plan:'分析计划', prepared:'分析代码已准备好。', need:'需要更多信息', coach:'Vibestats coach', interpreting:'解释中…' },
     yue:{ plan:'分析計劃', prepared:'分析代碼已準備好。', need:'需要更多資料', coach:'Vibestats coach', interpreting:'解讀緊…' },
@@ -1940,7 +1969,7 @@ function App() {
     }
   }
 
-  function showProgress(text, pct=12, note='대용량 데이터나 패키지 설치 상황에 따라 시간이 달라질 수 있습니다.') {
+  function showProgress(text, pct=12, note='Processing time may vary depending on data size and package installation.') {
     setProgress({ text, pct, note, started:Date.now() });
   }
   function hideProgress() { setProgress(null); }
@@ -1975,7 +2004,7 @@ function App() {
     let base = f.name.replace(/\.[^.]+$/,'').replace(/\W+/g,'_') || 'data';
     if (/^\d/.test(base)) base = 'd_'+base;
     let nm = base, i=1; while ((window._dsCache||{})[nm]) { i++; nm = base+i; }
-    setBusy(true); showProgress(`Importing dataset '${nm}'…`, 18, '파일 크기와 형식에 따라 걸리는 시간이 달라집니다.');
+    setBusy(true); showProgress(`Importing dataset '${nm}'…`, 18, 'Processing time may vary depending on file size and format.');
     try {
       await loadDataFile(nm, f); showProgress(`Refreshing dataset list…`, 82);
       await refreshSchema();
@@ -1987,7 +2016,7 @@ function App() {
   }
 
   function shouldAllowDatasetCreation(intentText='') {
-    return /(create|save|store|overwrite|replace|update|modify|convert|recode|rename|new\s+dataset|make\s+dataset|filter|filtered|merge|join|append|bind|reshape|transform|mutate|subset|clean\s+dataset|derive\s+dataset|데이터셋\s*(생성|만들|저장|수정|변경)|새\s*데이터|필터|병합|합치|변환|가공|저장|수정|변경|덮어쓰기|숫자형|문자형|범주형|날짜형|결측치|제거|정리)/i.test(String(intentText || ''));
+    return /(create|save|store|overwrite|replace|update|modify|convert|recode|rename|new\s+dataset|make\s+dataset|filter|filtered|merge|join|append|bind|reshape|transform|mutate|subset|clean\s+dataset|derive\s+dataset|numeric|character|factor|categorical|date|missing\s+values|remove\s+missing|tidy|clean)/i.test(String(intentText || ''));
   }
 
   function shouldAllowDirectRDatasetSave(code='') {
@@ -2026,14 +2055,14 @@ function App() {
     setActiveId(id);
     dispatchOutput(rr.res, `#${index} ${rr.summary||generatedSummary||''}`.trim(), rr.code, rr.formula || generatedFormula || '', false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
+    if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
     if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
     hideProgress(); setBusy(false);
   }
 
   async function preparePromptCode(runAfter=false) {
     const text = promptRef.current.value.trim(); if (!text) return;
-    setBusy(true); setParseErr(''); showProgress(runAfter ? 'Analyzing and running…' : 'Generating R code…', 35, '데이터 값은 보내지 않고 데이터셋/컬럼 구조만 사용합니다.');
+    setBusy(true); setParseErr(''); showProgress(runAfter ? 'Analyzing and running…' : 'Generating R code…', 35, 'Only the dataset and column structure is used; raw data values are not sent.');
     try {
       const localIssue = detectMethodRequirementIssue(text, schema, activeDatasets);
       if (localIssue && !coach) {
@@ -2059,7 +2088,7 @@ function App() {
           setBlocks(bs => [...bs, block]);
           setActiveId(id);
           dispatchOutput(rr.res, `#${index} ${rr.summary||a.summary||''}`.trim(), rr.code, rr.formula || a.formula || '', false, outputLanguageInstruction(text));
-          if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
+          if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
           if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; }
         }
       }
@@ -2092,7 +2121,7 @@ function App() {
     let currentCode = initialCode, currentSummary = summary, currentFormula = formula;
     let res = null;
     for (let attempt=1; attempt<=5; attempt++) {
-      showProgress(attempt===1 ? 'Running R code…' : `Repairing and retrying R code (${attempt}/5)…`, Math.min(88, 15 + attempt*14), '오류가 있으면 최대 5회까지 자동으로 코드를 수정해 다시 실행합니다.');
+      showProgress(attempt===1 ? 'Running R code…' : `Repairing and retrying R code (${attempt}/5)…`, Math.min(88, 15 + attempt*14), 'If an error occurs, the code is automatically repaired and retried up to 5 times.');
       res = await runCodeCore(currentCode, allowNewDatasets);
       if (!res.error) return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:attempt>1 };
       if (isDataReferenceError(res.error)) {
@@ -2101,7 +2130,7 @@ function App() {
         return { res:{ error: msg }, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:false, noRepair:true };
       }
       const msg = cleanErrorMessage(res.error);
-      setParseErr(`오류가 발생했습니다. 자동 수정 시도 ${attempt}/5\n${msg}`);
+      setParseErr(`An error occurred. Automatic repair attempt ${attempt}/5\n${msg}`);
       pushLog({ head:`[${now()}] auto-repair ${attempt}/5`, error:true, text:msg });
       if (attempt===5) break;
       try {
@@ -2118,7 +2147,7 @@ ${beforeCode}
 ${currentCode}` });
       } catch(repairErr) {
         res = { error: 'Auto-repair failed: ' + (repairErr.message || repairErr) };
-        setParseErr(`오류가 발생했고 자동 수정에도 실패했습니다.\n${cleanErrorMessage(res.error)}`);
+        setParseErr(`An error occurred and automatic repair failed.\n${cleanErrorMessage(res.error)}`);
         break;
       }
     }
@@ -2134,7 +2163,7 @@ ${currentCode}` });
     const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40), shouldAllowDatasetCreation(intentText) || shouldAllowDirectRDatasetSave(code));
     await refreshSchema();
     dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code, rr.formula || formula, false, outputLanguageInstruction(intentText));
-    if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
+    if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
     hideProgress(); setBusy(false);
   }
 
@@ -2154,7 +2183,7 @@ ${currentCode}` });
     setActiveId(id);
     dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code, rr.formula || formula, false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (rr.repaired && !rr.res.error) setParseErr('오류가 자동으로 수정되어 정상 실행되었습니다. 수정된 코드가 R Code 창에 반영되었습니다.');
+    if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
     if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
     hideProgress(); setBusy(false);
   }
@@ -2642,7 +2671,7 @@ ${code || '(none)'}` });
         h('div', { className:'ptitle' }, 'Processing…'),
         h('div', { className:'pmsg' }, progress.text),
         h('div', { className:'pbar' }, h('i', { style:{width:Math.max(8, Math.min(100, progress.pct || 25)) + '%'} })),
-        h('div', { className:'pnote' }, progress.note || '작업을 처리하는 중입니다.'))),
+        h('div', { className:'pnote' }, progress.note || 'Processing your request.'))),
 
     ctx && h('div', { className:'ctx', style:{left:ctx.x, top:ctx.y}, onClick:e=>e.stopPropagation() },
       ctx.kind==='dataset'
