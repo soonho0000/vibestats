@@ -499,16 +499,19 @@
 
   /* R Code tabs, prompt/code switch, and terminal view */
   .code-tabs {
-    flex:0 0 32px; display:flex; align-items:flex-end; gap:0;
-    padding:3px 8px 0; border-bottom:1px solid var(--line);
-    background:color-mix(in srgb, var(--panel-2) 46%, var(--bg)); overflow-x:auto;
+    flex:0 0 32px; display:flex; align-items:center; gap:5px;
+    padding:0 8px; border-bottom:1px solid var(--line);
+    background:var(--panel-2); overflow-x:auto;
+    font-family:var(--mono); font-size:10px; text-transform:uppercase;
+    letter-spacing:1.3px; color:var(--ink-dim); user-select:none;
   }
   .code-tabs .grow { flex:1; min-width:8px; }
-  .rcode-toolbar-title { color:var(--ink-dim); font-family:var(--mono); font-size:10px; font-weight:800; letter-spacing:1.1px; text-transform:uppercase; margin:0 8px 7px 4px; white-space:nowrap; }
-  .rcode-left-actions { display:inline-flex; align-items:center; gap:4px; margin:0 8px 4px 0; }
+  .rcode-toolbar-dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:0 0 auto; }
+  .rcode-toolbar-title { color:var(--ink-dim); font-family:var(--mono); font-size:10px; font-weight:400; letter-spacing:1.3px; text-transform:uppercase; margin:0 7px 0 0; white-space:nowrap; line-height:1; }
+  .rcode-right-actions { display:inline-flex; align-items:center; gap:4px; margin-left:6px; flex:0 0 auto; }
   .tab-control-btn {
     height:24px !important; min-width:28px !important; padding:0 8px !important;
-    margin:0 0 4px 4px !important; border-radius:5px !important;
+    margin:0 !important; border-radius:5px !important;
     border:1px solid var(--line-bright) !important;
     background:linear-gradient(180deg, var(--panel-2), var(--panel)) !important;
     color:var(--ink-dim) !important; font-family:var(--mono) !important;
@@ -521,7 +524,7 @@
   .tab-save-btn { min-width:58px !important; }
   .code-tab {
     position:relative; display:inline-flex; align-items:center; gap:6px;
-    max-width:118px; min-width:74px; height:27px; padding:0 7px 0 12px;
+    max-width:118px; min-width:74px; height:25px; padding:0 7px 0 12px;
     border:1px solid var(--line); border-bottom:0; border-radius:9px 9px 0 0;
     background:linear-gradient(180deg, var(--panel-2), var(--panel)); color:var(--ink-dim);
     font-family:var(--mono); font-size:10px; cursor:pointer; white-space:nowrap;
@@ -2775,16 +2778,17 @@ ${code || '(none)'}` });
 
   function renderCodeTabs(includeActions=false) {
     return h('div', { className:'code-tabs' },
-      includeActions && h('div', { className:'rcode-left-actions' },
-        h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
-        h('button', { className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane') }, '⛶')),
+      includeActions && h('span', { className:'rcode-toolbar-dot' }),
       includeActions && h('span', { className:'rcode-toolbar-title' }, 'R Code'),
       codeTabs.map(t => h('button', { key:t.id, className:'code-tab' + (t.id === activeCodeTab ? ' active' : '') + ((t.savedCode || '') === (t.code || '') && (t.code || '').trim() ? ' saved' : ''), title:t.name, onClick:()=>setActiveCodeTab(t.id) },
         h('span', { className:'code-tab-label' }, t.name),
         h('span', { className:'code-tab-x', role:'button', title:'Close this R code tab', onClick:e=>{ e.preventDefault(); e.stopPropagation(); closeCodeTab(t.id); } }, '×'))),
       h('button', { className:'tab-control-btn tab-add-btn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
       h('button', { className:'tab-control-btn tab-save-btn', onClick:saveActiveCodeTab, title:'Save the active R code tab as a Block' }, 'Save'),
-      h('span', { className:'grow' }));
+      h('span', { className:'grow' }),
+      includeActions && h('div', { className:'rcode-right-actions' },
+        h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
+        h('button', { className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane') }, '⛶')));
   }
 
   function renderRCodeEditor(full=false, showTabs=true) {
