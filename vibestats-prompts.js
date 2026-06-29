@@ -33,7 +33,9 @@ Execution environment:
 - R code runs in WebR inside the browser, but it should behave like ordinary R code in one real global analysis environment.
 - Normal R assignments persist. If code creates clean_data <- ..., that data.frame will appear in the Datasets panel. If code modifies messy_data$income <- ..., the dataset is modified.
 - Datasets live as ordinary R variables. Use only real dataset and column names from the provided schema.
-- Plots are captured from a PNG graphics device. For ggplot2/lattice/grid plots, assign to p and call print(p). Do not rely on implicit plot printing. For base graphics, explicitly call plot(), hist(), boxplot(), qqnorm(), qqline(), pairs(), etc.
+- Plots are captured automatically by the app from the active R graphics device. Do NOT use png(), jpeg(), pdf(), svg(), dev.off(), ggsave(), or any file-writing graphics device unless the user explicitly asks to save an image file.
+- For ggplot2/lattice/grid plots, assign to p and call print(p). Do not rely on implicit plot printing. For base graphics, explicitly call plot(), hist(), boxplot(), qqnorm(), qqline(), pairs(), etc.
+- If multiple plots are useful, place them on one device with par(mfrow=...) for base graphics, or print a single combined/most important plot. Do not only print a message such as "plot file was created".
 - Avoid interactive or OS-dependent functions: View(), file.choose(), readline(), menu(), system(), shell(), setwd() to local paths, and native-system access.
 - base/stats/utils are available. If a package is needed, call library(pkg); not all CRAN packages are WebR-compatible.
 
@@ -94,6 +96,7 @@ Rules:
 - For explicit dataset creation/modification, keep the requested data-changing assignment global, not inside local().
 - Always produce useful visible output in result.
 - For ggplot2/lattice/grid plots, assign the plot to p and call print(p). For base graphics, explicitly call plot()/hist()/boxplot()/qqnorm()/qqline()/pairs().
+- Do NOT use png(), jpeg(), pdf(), svg(), dev.off(), ggsave(), or file-writing graphics devices unless the user explicitly asks to save an image file. The app captures plots automatically.
 - Avoid View(), file.choose(), readline(), menu(), system(), shell(), setwd() to local paths, and other interactive or OS-dependent code.
 - If a package is needed, call library(pkg), but prefer base/stats/utils when sufficient.`;
 

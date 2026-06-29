@@ -995,15 +995,46 @@ async function executeR(code, allowNewDatasets=false) {
 .vibestats_run <- function() {
   .env <- .nlstat_env
   .code <- ${rLiteral}
+  on.exit(try({ while (grDevices::dev.cur() > 1L) grDevices::dev.off() }, silent=TRUE), add=TRUE)
   .sets_result <- grepl('result[[:space:]]*(<-|=)', .code)
-  .plotfile <- "/tmp/__vibestats_plot.png"
-  if (file.exists(.plotfile)) file.remove(.plotfile)
-  grDevices::png(.plotfile, width=720, height=480, res=96)
+  .plotpattern <- "/tmp/__vibestats_plot%03d.png"
+  .plotfile <- "/tmp/__vibestats_plot001.png"
+  .plot_dirs <- unique(c("/tmp", tempdir(), getwd()))
+  .list_pngs <- function() {
+    unique(unlist(lapply(.plot_dirs, function(d) {
+      if (dir.exists(d)) list.files(d, pattern="[.]png$", full.names=TRUE) else character(0)
+    }), use.names=FALSE))
+  }
+  .png_before <- .list_pngs()
+  .old_internal <- list.files("/tmp", pattern="^__vibestats_plot.*[.]png$", full.names=TRUE)
+  if (length(.old_internal)) try(unlink(.old_internal), silent=TRUE)
   .eval_out <- NULL
   .console <- capture.output({
+    grDevices::png(.plotpattern, width=720, height=480, res=96)
     .eval_out <- withVisible(eval(parse(text=.code), envir=.env))
+    if (exists("p", envir=.env, inherits=FALSE)) {
+      .p <- get("p", envir=.env, inherits=FALSE)
+      .plot_classes <- c("ggplot", "ggplot2::ggplot", "trellis", "grob", "gTree", "recordedplot")
+      if (inherits(.p, .plot_classes)) {
+        if (grDevices::dev.cur() == 1L) grDevices::png(.plotpattern, width=720, height=480, res=96)
+        print(.p)
+      }
+    }
   })
-  try(grDevices::dev.off(), silent=TRUE)
+  try({ while (grDevices::dev.cur() > 1L) grDevices::dev.off() }, silent=TRUE)
+  .png_after <- .list_pngs()
+  .new_pngs <- setdiff(.png_after, .png_before)
+  .internal_pngs <- list.files("/tmp", pattern="^__vibestats_plot.*[.]png$", full.names=TRUE)
+  .plot_candidates <- unique(c(.new_pngs, .internal_pngs, .plotfile))
+  .plot_candidates <- .plot_candidates[file.exists(.plot_candidates)]
+  .plot_sizes <- suppressWarnings(file.info(.plot_candidates)$size)
+  .valid <- which(!is.na(.plot_sizes) & .plot_sizes > 500)
+  .plotPath <- ""
+  if (length(.valid)) {
+    .valid_paths <- .plot_candidates[.valid]
+    .valid_sizes <- .plot_sizes[.valid]
+    .plotPath <- .valid_paths[which.max(.valid_sizes)]
+  }
   result <- NULL
   if (isTRUE(.sets_result) && exists("result", envir=.env, inherits=FALSE)) {
     result <- get("result", envir=.env, inherits=FALSE)
@@ -1090,7 +1121,7 @@ async function executeR(code, allowNewDatasets=false) {
     .resultHtml <- .obj_html(result, "Result")
     if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
   }
-  paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__SAVED__", paste(.savedNames, collapse=","), "__RKEY__", .resultKey)
+  paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__SAVED__", paste(.savedNames, collapse=","), "__PLOT__", .plotPath, "__RKEY__", .resultKey)
 }
 .vibestats_out <- tryCatch(.vibestats_run(), error=function(e) paste0("__ERR__", conditionMessage(e)))
 .vibestats_out
@@ -1110,19 +1141,32 @@ async function executeR(code, allowNewDatasets=false) {
       }
       throw new Error('R execution error: ' + msg);
     }
-    let resultText = '', resultHtml = '', consoleText = '', savedDataset = '', resultKeyOut = '';
-    const ri = out.indexOf('__RESULT__'), hi = out.indexOf('__HTML__'), ci = out.indexOf('__CONSOLE__'), si = out.indexOf('__SAVED__'), ki = out.indexOf('__RKEY__');
-    if (ri>=0 && hi>=0 && ci>=0 && si>=0 && ki>=0) {
+    let resultText = '', resultHtml = '', consoleText = '', savedDataset = '', resultKeyOut = '', plotPathOut = '';
+    const ri = out.indexOf('__RESULT__'), hi = out.indexOf('__HTML__'), ci = out.indexOf('__CONSOLE__'), si = out.indexOf('__SAVED__'), pi = out.indexOf('__PLOT__'), ki = out.indexOf('__RKEY__');
+    if (ri>=0 && hi>=0 && ci>=0 && si>=0 && pi>=0 && ki>=0) {
       resultText = out.slice(ri+10, hi);
       resultHtml = out.slice(hi+8, ci);
       consoleText = out.slice(ci+11, si);
-      savedDataset = out.slice(si+9, ki);
+      savedDataset = out.slice(si+9, pi);
+      plotPathOut = out.slice(pi+8, ki).trim();
       resultKeyOut = out.slice(ki+8);
     }
     let plot = null;
-    try { const buf = await webR.FS.readFile('/tmp/__vibestats_plot.png');
-      if (buf && buf.length>200) { let bin=''; for(let i=0;i<buf.length;i++) bin+=String.fromCharCode(buf[i]);
-        plot='data:image/png;base64,'+btoa(bin); await webR.FS.unlink('/tmp/__vibestats_plot.png').catch(()=>{}); } } catch(e){}
+    const plotCandidates = [...new Set([plotPathOut, '/tmp/__vibestats_plot001.png', '/tmp/__vibestats_plot.png'].filter(Boolean))];
+    for (const plotPath of plotCandidates) {
+      try {
+        const buf = await webR.FS.readFile(plotPath);
+        if (buf && buf.length > 500) {
+          let bin='';
+          for(let i=0;i<buf.length;i++) bin+=String.fromCharCode(buf[i]);
+          plot='data:image/png;base64,'+btoa(bin);
+          break;
+        }
+      } catch(e) {}
+    }
+    try {
+      for (const plotPath of plotCandidates) await webR.FS.unlink(plotPath).catch(()=>{});
+    } catch(e) {}
     await getSchema();
     let after = Object.keys(window._dsCache||{});
     let newOnes = after.filter(n=>!before.has(n));
