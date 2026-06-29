@@ -1324,6 +1324,21 @@ async function executeR(code, allowNewDatasets=false) {
       plotPathOut = out.slice(pi+8, ki).trim();
       resultKeyOut = out.slice(ki+8);
     }
+    // Keep Console and Results semantically identical: Console shows raw text;
+    // Results shows the same text as HTML, plus any richer table/plot rendering.
+    const unifiedConsoleText = (terminalText && String(terminalText).trim())
+      ? String(terminalText).trim()
+      : [consoleText, resultText].filter(x => x && String(x).trim()).join('\n').trim();
+    if (unifiedConsoleText) consoleText = unifiedConsoleText;
+    if (unifiedConsoleText && !resultHtml && resultText && String(resultText).trim()) {
+      resultHtml = '<pre class="result-pre">' + String(resultText).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</pre>';
+    }
+    if (unifiedConsoleText) {
+      const escapedConsole = String(unifiedConsoleText).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      const consoleHtml = '<details class="technical-log" open><summary>Console</summary><pre>' + escapedConsole + '</pre></details>';
+      if (resultHtml) resultHtml += consoleHtml;
+      else resultHtml = consoleHtml;
+    }
     let plot = null;
     const plotCandidates = [...new Set([plotPathOut, '/tmp/__vibestats_plot001.png', '/tmp/__vibestats_plot.png'].filter(Boolean))];
     for (const plotPath of plotCandidates) {
@@ -2214,8 +2229,8 @@ function App() {
     const existing = codeTabs.find(t => t.blockId === blockId);
     if (existing) {
       setActiveCodeTab(existing.id);
-      pushLog({ head:`[${now()}] Block edit tab already open`, text:`Block #${b.index} is already open in ${existing.name || 'an R code tab'}.` });
       setModal(null);
+      pushLog({ head:`[${now()}] Block edit tab already open`, text:`Block #${b.index} is already open in ${existing.name || 'an R code tab'}.` });
       return;
     }
     if (codeTabs.length >= 5) { alert('There are already 5 R code tabs open. Please close one tab first.'); return; }
@@ -2383,20 +2398,11 @@ function App() {
     let nm = base, i=1; while ((window._dsCache||{})[nm]) { i++; nm = base+i; }
     setBusy(true); showProgress(`Importing dataset '${nm}'…`, 18, 'Processing time may vary depending on file size and format.');
     try {
-      const loadedNames = await loadDataFile(nm, f); showProgress(`Refreshing dataset list…`, 82);
+      await loadDataFile(nm, f); showProgress(`Refreshing dataset list…`, 82);
       await refreshSchema();
-      const visibleNames = (loadedNames && loadedNames.length ? loadedNames : [nm]).filter(x => (window._dsCache || {})[x]);
-      visibleNames.forEach(x => markDatasetKind(x, 'uploaded'));
-      setNewNames(prev => Array.from(new Set([...(prev || []), ...visibleNames])));
-      const details = visibleNames.map(x => {
-        const sc = (window._dsCache || {})[x] || {shape:[0,0], columns:[], kind:'object'};
-        const colText = (sc.columns && sc.columns.length) ? `
-Columns: ${sc.columns.join(', ')}` : '';
-        return `${x}: ${sc.kind || 'object'} ${sc.shape ? sc.shape[0] + ' × ' + sc.shape[1] : ''}${colText}`;
-      }).join('
-
-');
-      pushLog({ head:`[${now()}] load '${f.name}'`, text: details || 'File loaded, but no visible objects were found.' });
+      const sc = window._dsCache[nm];
+      markDatasetKind(nm, 'uploaded');
+      pushLog({ head:`[${now()}] load '${nm}'`, text:`Loaded ${sc.shape[0]} rows × ${sc.shape[1]} cols\nColumns: ${sc.columns.join(', ')}` });
     } catch(err){ pushLog({ head:`[${now()}] load failed`, error:true, text: err.message||String(err) }); }
     hideProgress(); setBusy(false);
   }
@@ -2593,8 +2599,7 @@ ${currentCode}` });
     const resultLineCount = res.resultText ? res.resultText.split(/\r?\n/).length : 0;
     let displayed = false;
     if (res.resultHtml || (res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot) {
-      const consoleOnly = (res.consoleText && String(res.consoleText).trim()) ? String(res.consoleText).trim() : '';
-      pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: appendConsoleHtml(res.resultHtml || '', consoleOnly), plot: res.plot || null,
+      pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: res.resultHtml || '', plot: res.plot || null,
                    _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: res.resultKey || null, _outputLanguage: entryOutputLanguage });
       displayed = true;
     }
@@ -3159,7 +3164,7 @@ ${code || '(none)'}` });
         : ctx.kind==='dataset-empty'
           ? [ h('div',{key:1,className:'item', onClick:()=>{ newBlankDataset(); setCtx(null); }},h('span',{className:'ico'},'＋'),'New dataset') ]
         : ctx.kind==='datasets-selected'
-          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`) ]
+          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }}, h('span',{className:'ico'},'🗑'), `Delete ${selectedDatasets.length} datasets`) ]
         : ctx.kind==='blocks-selected'
           ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }}, h('span',{className:'ico'},'🗑'), `Delete ${selectedIds.length} blocks`) ]
           : [ h('div',{key:1,className:'item', onClick:()=>{ openBlockInRCodeTab(ctx.id); setCtx(null); }}, h('span',{className:'ico'},'✎'), 'Edit mode'),
@@ -3284,6 +3289,7 @@ function blockSquare(b, activeId, selectedIds, fns) {
       h('div',{className:'bbtn',title:'info',onMouseDown:e=>e.stopPropagation(),onClick:()=>fns.showBlockInfo(b.id)},'ⓘ')));
 }
 
+
 function renderDatasetTree(node) {
   if (!node) return null;
   const children = Array.isArray(node.children) ? node.children : [];
@@ -3294,9 +3300,7 @@ function renderDatasetTree(node) {
     children.map((ch, i) => h(React.Fragment, { key:(ch.name || 'node') + i }, renderDatasetTree(ch)))
   );
 }
-
 function dsItem(n, info, kind, selected, fns) {
-
   const clickOpen = (e) => {
     if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); fns.setSelectedDatasets(ds=>ds.includes(n)?ds.filter(x=>x!==n):[...ds,n]); return; }
     fns.setSelectedDatasets([]);
