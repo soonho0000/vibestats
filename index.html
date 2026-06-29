@@ -758,7 +758,23 @@ async function getSchema() {
       else v <- substr(as.character(v),1,18)
       paste(v, collapse='|')
     }
+    kind_of <- function(x) {
+      if (is.data.frame(x)) return('data.frame')
+      if (is.matrix(x)) return('matrix')
+      if (is.list(x)) return('list')
+      if (is.atomic(x)) return(typeof(x))
+      paste(class(x), collapse='/')
+    }
+    dim_of <- function(x) {
+      if (is.data.frame(x) || is.matrix(x)) return(c(nrow(x), ncol(x)))
+      if (is.list(x)) return(c(length(x), 1L))
+      if (is.atomic(x)) return(c(length(x), 1L))
+      return(c(1L, 1L))
+    }
     for (n in nms) { d <- get(n, envir=.nlstat_env)
+      cls <- paste(class(d), collapse='/')
+      kd <- kind_of(d)
+      dm <- dim_of(d)
       if (is.data.frame(d)) {
         cn <- names(d)
         colparts <- character(0)
@@ -767,8 +783,16 @@ async function getSchema() {
             jesc(cn[j]), rtype(d[[j]]), jesc(sampval(d[[j]]))))
         }
         cols <- paste0('"', jesc(cn), '"', collapse=",")
-        parts <- c(parts, sprintf('"%s":{"columns":[%s],"shape":[%d,%d],"fields":[%s]}',
-          jesc(n), cols, nrow(d), ncol(d), paste(colparts, collapse=","))) } }
+        parts <- c(parts, sprintf('"%s":{"columns":[%s],"shape":[%d,%d],"fields":[%s],"kind":"%s","class":"%s"}',
+          jesc(n), cols, dm[1], dm[2], paste(colparts, collapse=","), jesc(kd), jesc(cls)))
+      } else {
+        cols <- character(0)
+        if (is.matrix(d) && !is.null(colnames(d))) cols <- colnames(d)
+        else if (is.list(d) && !is.null(names(d))) cols <- names(d)
+        cols_json <- paste0('"', jesc(cols), '"', collapse=",")
+        parts <- c(parts, sprintf('"%s":{"columns":[%s],"shape":[%d,%d],"fields":[],"kind":"%s","class":"%s"}',
+          jesc(n), cols_json, dm[1], dm[2], jesc(kd), jesc(cls)))
+      } }
     paste0("{", paste(parts, collapse=","), "}") })`;
   let schema = {};
   try { schema = JSON.parse(await webR.evalRString(code)); } catch(e) {}
@@ -1350,9 +1374,9 @@ function importInfo(fname) {
     xpt:  { lib:'haven',  read:(p)=>`as.data.frame(haven::read_xpt(${p}))` },
     xls:  { lib:'readxl', read:(p)=>`as.data.frame(readxl::read_excel(${p}))` },
     xlsx: { lib:'readxl', read:(p)=>`as.data.frame(readxl::read_excel(${p}))` },
-    rds:  { lib:null,     read:(p)=>`as.data.frame(readRDS(${p}))` },
-    rdata:{ lib:null,     read:(p)=>`local({ e<-new.env(); load(${p}, envir=e); get(ls(e)[1], envir=e) })` },
-    rda:  { lib:null,     read:(p)=>`local({ e<-new.env(); load(${p}, envir=e); get(ls(e)[1], envir=e) })` },
+    rds:  { lib:null,     read:(p)=>`readRDS(${p})` },
+    rdata:{ lib:null,     read:(p)=>`load(${p}, envir=.nlstat_env)` },
+    rda:  { lib:null,     read:(p)=>`load(${p}, envir=.nlstat_env)` },
   };
   return map[ext] || null;
 }
@@ -1369,9 +1393,27 @@ async function loadDataFile(name, file) {
     await webR.FS.writeFile(path, buf);
   }
   if (info.lib) { try { await webR.installPackages([info.lib]); } catch(e){} }
+
+  // RData/RDA should behave like RStudio: load every object in the file into the R environment,
+  // preserving its original R class/type instead of coercing to a data.frame or picking only one object.
+  if (ext === 'rdata' || ext === 'rda') {
+    const loadedJson = await webR.evalRString(`local({
+      .before <- ls(.nlstat_env, all.names=TRUE)
+      .loaded <- load(${JSON.stringify(path)}, envir=.nlstat_env)
+      .after <- ls(.nlstat_env, all.names=TRUE)
+      .new <- setdiff(.after, .before)
+      .out <- unique(c(.loaded, .new))
+      .esc <- function(x) { x <- gsub('\\\\','\\\\\\\\', x); x <- gsub('"','\\\\"', x); x }
+      paste0('[', paste0('"', .esc(.out), '"', collapse=','), ']')
+    })`);
+    await getSchema();
+    try { return JSON.parse(loadedJson); } catch(e) { return []; }
+  }
+
   const rexpr = info.read(JSON.stringify(path));
   await webR.evalRVoid(`assign(${JSON.stringify(name)}, ${rexpr}, envir=.nlstat_env)`);
   await getSchema();
+  return [name];
 }
 
 async function previewHTML(name, startRow=1, endRow=10000) {
@@ -1379,6 +1421,11 @@ async function previewHTML(name, startRow=1, endRow=10000) {
   endRow = Math.max(startRow, parseInt(endRow || startRow, 10));
   const code = `local({ d <- get(${JSON.stringify(name)}, envir=.nlstat_env)
     if (is.null(d)) return("")
+    if (!is.data.frame(d)) {
+      txt <- paste(capture.output(str(d, max.level=2, give.attr=FALSE)), collapse="\n")
+      esc0 <- function(x) { x <- gsub("&", "&amp;", x, fixed=TRUE); x <- gsub("<", "&lt;", x, fixed=TRUE); x <- gsub(">", "&gt;", x, fixed=TRUE); x }
+      return(paste0("<pre class='result-pre'>", esc0(txt), "</pre>"))
+    }
     nr <- nrow(d); start <- max(1L, min(${startRow}L, nr)); end <- max(start, min(${endRow}L, nr))
     d <- d[start:end, , drop=FALSE]
     esc <- function(x) {
@@ -2005,26 +2052,8 @@ function App() {
   const [datasetKinds, setDatasetKinds] = useState({});
   const [datasetNotes, setDatasetNotes] = useState({});
   const [blocks, setBlocks] = useState([]);
-  const [codeTabs, setCodeTabs] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v4') || 'null');
-      if (saved && Array.isArray(saved.tabs) && saved.tabs.length) {
-        return saved.tabs.slice(0, 5).map((t, i) => ({
-          id: t.id || ('code' + (i + 1)),
-          name: t.name || ('Code ' + (i + 1)),
-          code: String(t.code || ''),
-          savedCode: String(t.savedCode || '')
-        }));
-      }
-    } catch(e) {}
-    return [{ id:'code1', name:'Code 1', code:'', savedCode:'' }];
-  });
-  const [activeCodeTab, setActiveCodeTab] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v4') || 'null');
-      return saved?.active || 'code1';
-    } catch(e) { return 'code1'; }
-  });
+  const [codeTabs, setCodeTabs] = useState([{ id:'code1', name:'Code 1', code:'', savedCode:'', blockId:null }]);
+  const [activeCodeTab, setActiveCodeTab] = useState('code1');
   const [promptCodeSwapped, setPromptCodeSwapped] = useState(true);
   const [showTerminal, setShowTerminal] = useState(false);
   const [terminalEntries, setTerminalEntries] = useState([]);
@@ -2063,7 +2092,7 @@ function App() {
   const blocksRef = useRef(blocks); blocksRef.current = blocks;
   const idCounter = useRef(0);
   const terminalCounter = useRef(0);
-  const activeCodeTabObj = codeTabs.find(t => t.id === activeCodeTab) || codeTabs[0] || { id:'code1', name:'Code 1', code:'', savedCode:'' };
+  const activeCodeTabObj = codeTabs.find(t => t.id === activeCodeTab) || codeTabs[0] || { id:'code1', name:'Code 1', code:'', savedCode:'', blockId:null };
   const codeText = activeCodeTabObj.code || '';
   function setCodeText(value) {
     setCodeTabs(tabs => tabs.map(t => {
@@ -2075,31 +2104,61 @@ function App() {
   function addCodeTab() {
     if (codeTabs.length >= 5) { alert('You can create up to 5 R code tabs.'); return; }
     const id = 'code' + Date.now() + '_' + Math.floor(Math.random()*10000);
-    const tab = { id, name:'Code ' + (codeTabs.length + 1), code:'', savedCode:'' };
+    const tab = { id, name:'Code ' + (codeTabs.length + 1), code:'', savedCode:'', blockId:null };
     setCodeTabs(tabs => [...tabs, tab].slice(0, 5));
     setActiveCodeTab(id);
+  }
+  function createBlockFromCodeTab(tab, codeOverride=null) {
+    const code = String(codeOverride !== null ? codeOverride : (tab?.code || '')).trim();
+    if (!code) return null;
+    const index = blocksRef.current.length + 1;
+    const id = 'b' + (++idCounter.current);
+    const block = {
+      id, index,
+      summary: `Saved R code from ${tab?.name || 'R code tab'}`,
+      code, formula:'', status:'ok', label:'', newline:false,
+      userMemo:'Saved from an R Code tab; not executed at save time.'
+    };
+    setBlocks(bs => [...bs, block]);
+    setActiveId(id);
+    pushLog({ head:`[${now()}] R code tab saved as Block`, text:`${tab?.name || 'R code tab'} was saved as Block #${index}.` });
+    return { id, index };
+  }
+  function updateBlockFromCodeTab(tab, codeOverride=null) {
+    const code = String(codeOverride !== null ? codeOverride : (tab?.code || '')).trim();
+    if (!code || !tab?.blockId) return false;
+    let updatedIndex = null;
+    setBlocks(bs => bs.map(b => {
+      if (b.id !== tab.blockId) return b;
+      updatedIndex = b.index;
+      return { ...b, code, summary: b.summary || `Saved R code from ${tab.name || 'R code tab'}`, status: b.status || 'ok' };
+    }));
+    if (updatedIndex) pushLog({ head:`[${now()}] R code tab updated Block`, text:`${tab.name || 'R code tab'} updated Block #${updatedIndex}.` });
+    return true;
   }
   function saveActiveCodeTab() {
     const tab = codeTabs.find(t => t.id === activeCodeTab) || activeCodeTabObj;
     const code = String(tab?.code || '').trim();
     if (!code) { alert('This R code tab is blank. There is nothing to save as a Block.'); return; }
-    saveCodeTabAsBlock(tab);
-    setCodeTabs(tabs => tabs.map(t => t.id === activeCodeTab ? { ...t, savedCode:t.code || '' } : t));
+    if (tab.blockId && blocksRef.current.some(b => b.id === tab.blockId)) {
+      updateBlockFromCodeTab(tab);
+      setCodeTabs(tabs => tabs.map(t => t.id === activeCodeTab ? { ...t, savedCode:t.code || '' } : t));
+      return;
+    }
+    const saved = createBlockFromCodeTab(tab);
+    if (saved) {
+      setCodeTabs(tabs => tabs.map(t => t.id === activeCodeTab ? { ...t, blockId:saved.id, name:`Block#${saved.index}`, savedCode:t.code || '' } : t));
+    }
   }
   function saveCodeTabAsBlock(tab) {
     const code = String(tab?.code || '').trim();
-    if (!code) return;
-    const index = blocksRef.current.length + 1;
-    const id = 'b' + (++idCounter.current);
-    const block = {
-      id, index,
-      summary: `Saved R code from ${tab.name || 'R code tab'}`,
-      code, formula:'', status:'ok', label:'', newline:false,
-      userMemo:'Saved from an R Code tab before closing; not executed at save time.'
-    };
-    setBlocks(bs => [...bs, block]);
-    setActiveId(id);
-    pushLog({ head:`[${now()}] R code tab saved as Block`, text:`${tab.name || 'R code tab'} was saved as Block #${index}.` });
+    if (!code) return null;
+    if (tab.blockId && blocksRef.current.some(b => b.id === tab.blockId)) {
+      updateBlockFromCodeTab(tab);
+      const b = blocksRef.current.find(x => x.id === tab.blockId);
+      return b ? { id:b.id, index:b.index } : { id:tab.blockId, index:'' };
+    }
+    return createBlockFromCodeTab(tab);
   }
   function closeCodeTab(tabId) {
     const tab = codeTabs.find(t => t.id === tabId);
@@ -2107,7 +2166,7 @@ function App() {
     if (codeTabs.length <= 1) { alert('At least one R code tab must remain.'); return; }
     const code = String(tab.code || '').trim();
     if (code) {
-      const shouldSave = confirm(`Save the contents of ${tab.name || 'this tab'} as a Block before closing?\n\nOK = Save as Block and close\nCancel = Close without saving`);
+      const shouldSave = confirm(`Save the contents of ${tab.name || 'this tab'} as a Block before closing?\n\nOK = Save/update Block and close\nCancel = Close without saving`);
       if (shouldSave) saveCodeTabAsBlock(tab);
     } else {
       const shouldClose = confirm(`${tab.name || 'This tab'} is empty. Close it?`);
@@ -2117,8 +2176,18 @@ function App() {
     setCodeTabs(remaining);
     if (activeCodeTab === tabId && remaining.length) setActiveCodeTab(remaining[remaining.length - 1].id);
   }
+  function openBlockInRCodeTab(blockId) {
+    const b = blocksRef.current.find(x => x.id === blockId);
+    if (!b) return;
+    if (codeTabs.length >= 5) { alert('There are already 5 R code tabs open. Please close one tab first.'); return; }
+    const id = 'code' + Date.now() + '_' + Math.floor(Math.random()*10000);
+    const tab = { id, name:`Block#${b.index}`, code:String(b.code || ''), savedCode:String(b.code || ''), blockId:b.id };
+    setCodeTabs(tabs => [...tabs, tab].slice(0, 5));
+    setActiveCodeTab(id);
+    setModal(null);
+  }
   function pushTerminal(code, text, error=false) {
-    setTerminalEntries(es => [...es, { id:++terminalCounter.current, head:`[${now()}] ${error ? 'ERROR' : 'WebR terminal'}`, code:String(code || ''), text:String(text || ''), error:!!error }]);
+    setTerminalEntries(es => [...es, { id:++terminalCounter.current, head:`[${now()}] ${error ? 'ERROR' : 'WebR console'}`, code:String(code || ''), text:String(text || ''), error:!!error }]);
   }
   function terminalTextFromResult(res) {
     if (!res) return '';
@@ -2136,9 +2205,23 @@ function App() {
   useEffect(() => { document.body.classList.toggle('light', themeMode === 'light'); document.documentElement.classList.toggle('light', themeMode === 'light'); localStorage.setItem('vibestats_theme', themeMode); }, [themeMode]);
   useEffect(() => { document.documentElement.style.setProperty('--font-scale', String(fontScale)); document.body.style.setProperty('--font-scale', String(fontScale)); localStorage.setItem('vibestats_font_scale', String(fontScale)); }, [fontScale]);
   useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && String(e.key || '').toLowerCase() === 's') {
+        e.preventDefault();
+        saveProject();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [blocks, datasetKinds, datasetNotes]);
+  useEffect(() => {
     if (!codeTabs.find(t => t.id === activeCodeTab) && codeTabs[0]) setActiveCodeTab(codeTabs[0].id);
-    localStorage.setItem('vibestats_code_tabs_v4', JSON.stringify({ tabs:codeTabs, active:activeCodeTab }));
   }, [codeTabs, activeCodeTab]);
+  useEffect(() => {
+    // Stop restoring old R Code tabs from previous UI versions. R Code tabs are session-only;
+    // Save stores code as Blocks instead.
+    Object.keys(localStorage).filter(k => k.toLowerCase().includes('vibestats_code_tabs')).forEach(k => localStorage.removeItem(k));
+  }, []);
   function toggleTheme() { setThemeMode(m => m === 'light' ? 'dark' : 'light'); }
   function increaseFont() { setFontScale(v => Math.min(1.45, Math.round((v + 0.08) * 100) / 100)); }
   function resetFont() { setFontScale(1); }
@@ -2369,7 +2452,7 @@ function App() {
   async function runCodeCore(code, allowNewDatasets=false) {
     try {
       const res = await executeR(code, allowNewDatasets);
-      pushTerminal(code, terminalTextFromResult(res) || '(no WebR terminal output)', false);
+      pushTerminal(code, terminalTextFromResult(res) || '(no WebR console output)', false);
       return res;
     } catch(e) {
       const msg = e.message || String(e);
@@ -2577,8 +2660,12 @@ ${code || '(none)'}` });
     setBlocks(bs=>bs.map(b=>b.id===id ? {...b, userMemo:data.userMemo || '', summary:data.summary || '', formula:data.formula || '', code:data.code || ''} : b));
     setModal(null);
   }
-  function deleteBlock(id){ setBlocks(bs=>bs.filter(x=>x.id!==id).map((b,i)=>({...b,index:i+1}))); setSelectedIds(ids=>ids.filter(x=>x!==id)); }
-  function deleteSelectedBlocks(){ setBlocks(bs=>bs.filter(x=>!selectedIds.includes(x.id)).map((b,i)=>({...b,index:i+1}))); setSelectedIds([]); }
+  function syncCodeTabBlockNames(nextBlocks) {
+    const map = new Map(nextBlocks.map(b => [b.id, b.index]));
+    setCodeTabs(tabs => tabs.map(t => t.blockId ? (map.has(t.blockId) ? { ...t, name:`Block#${map.get(t.blockId)}` } : { ...t, blockId:null }) : t));
+  }
+  function deleteBlock(id){ setBlocks(bs=>{ const next=bs.filter(x=>x.id!==id).map((b,i)=>({...b,index:i+1})); syncCodeTabBlockNames(next); return next; }); setSelectedIds(ids=>ids.filter(x=>x!==id)); }
+  function deleteSelectedBlocks(){ setBlocks(bs=>{ const next=bs.filter(x=>!selectedIds.includes(x.id)).map((b,i)=>({...b,index:i+1})); syncCodeTabBlockNames(next); return next; }); setSelectedIds([]); }
   function setLabel(id,v){ setBlocks(bs=>bs.map(b=>b.id===id?{...b,label:v}:b)); }
   function toggleNewline(id,on){ setBlocks(bs=>bs.map(b=>b.id===id?{...b,newline:on}:b)); }
 
@@ -2594,7 +2681,7 @@ ${code || '(none)'}` });
       if (end - start + 1 > 10000 && !confirm('More than 10,000 rows may be slow. Continue?')) return;
     }
     let html=''; try{ html=await previewHTML(name,start,end);}catch(e){ html = `<div style="color:var(--red)">${String(e.message||e)}</div>`; }
-    setModal({ title:`${name}  (${sh[0]} × ${sh[1]}) rows ${start}-${Math.min(end, sh[0])}`, html, datasetName:name });
+    setModal({ title:`${name}  (${sc?.class || sc?.kind || 'object'}; ${sh[0]} × ${sh[1]})${sc?.kind === 'data.frame' ? ' rows '+start+'-'+Math.min(end, sh[0]) : ''}`, html, datasetName:name });
   }
   async function onDeleteDataset(name) {
     await deleteDataset(name); await refreshSchema();
@@ -2657,11 +2744,29 @@ ${code || '(none)'}` });
     }
   }
   async function saveProject() {
-    const names = await allDatasetNames(); const datasets={};
+    const names = await allDatasetNames();
+    const datasets = {};
     for (const n of names) datasets[n] = await exportCSV(n);
-    const proj = { version:3, app:'Vibestats', savedAt:new Date().toISOString(),
+    let rObjectsBase64 = '';
+    try {
+      const path = '/tmp/__vibestats_project_objects.rds';
+      await webR.evalRVoid(`local({
+        .env <- .nlstat_env
+        .nms <- ls(.env, all.names=TRUE)
+        .nms <- .nms[!grepl('^\\.vibestats_result_', .nms)]
+        saveRDS(mget(.nms, envir=.env, inherits=FALSE), ${JSON.stringify(path)})
+      })`);
+      const buf = await webR.FS.readFile(path);
+      let bin = '';
+      for (let i=0; i<buf.length; i++) bin += String.fromCharCode(buf[i]);
+      rObjectsBase64 = btoa(bin);
+      try { await webR.FS.unlink(path); } catch(e) {}
+    } catch(e) {
+      console.warn('[Vibestats] R object project save fallback used:', e);
+    }
+    const proj = { version:4, app:'Vibestats', savedAt:new Date().toISOString(),
       blocks: blocks.map(b=>({index:b.index,summary:b.summary,code:b.code,label:b.label,status:b.status,formula:b.formula,newline:b.newline,userMemo:b.userMemo||''})),
-      datasets, datasetKinds, datasetNotes };
+      datasets, rObjectsBase64, datasetKinds, datasetNotes };
     await saveTextFile('vibestats_project.json', 'application/json', JSON.stringify(proj,null,2));
   }
   async function newProject() {
@@ -2669,7 +2774,7 @@ ${code || '(none)'}` });
     const names = await allDatasetNames();
     for (const n of names) await deleteDataset(n);
     await refreshSchema();
-    setBlocks([]); setNewNames([]); setDatasetKinds({}); setDatasetNotes({}); setCodeText(''); setRestate(''); setFormula('');
+    setBlocks([]); setNewNames([]); setDatasetKinds({}); setDatasetNotes({}); setCodeTabs([{ id:'code1', name:'Code 1', code:'', savedCode:'', blockId:null }]); setActiveCodeTab('code1'); setRestate(''); setFormula('');
     
     // === INITIALIZE WITH WELCOME MESSAGE ===
     setResultEntries([initialWelcome]); 
@@ -2687,17 +2792,32 @@ ${code || '(none)'}` });
     try {
       const proj = JSON.parse(await f.text());
       const names = await allDatasetNames(); for (const n of names) await deleteDataset(n);
-      for (const [n,csv] of Object.entries(proj.datasets||{})) {
-        await webR.FS.writeFile('/tmp/'+n+'.csv', new TextEncoder().encode(csv));
-        await webR.evalRVoid(`assign(${JSON.stringify(n)}, utils::read.csv(${JSON.stringify('/tmp/'+n+'.csv')}, stringsAsFactors=FALSE), envir=.nlstat_env)`);
+      if (proj.rObjectsBase64) {
+        const bin = atob(proj.rObjectsBase64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const path = '/tmp/__vibestats_project_objects.rds';
+        await webR.FS.writeFile(path, bytes);
+        await webR.evalRVoid(`local({
+          .env <- .nlstat_env
+          .objs <- readRDS(${JSON.stringify(path)})
+          if (!is.list(.objs)) stop('Invalid project object store')
+          for (.nm in names(.objs)) assign(.nm, .objs[[.nm]], envir=.env)
+        })`);
+        try { await webR.FS.unlink(path); } catch(e) {}
+      } else {
+        for (const [n,csv] of Object.entries(proj.datasets||{})) {
+          await webR.FS.writeFile('/tmp/'+n+'.csv', new TextEncoder().encode(csv));
+          await webR.evalRVoid(`assign(${JSON.stringify(n)}, utils::read.csv(${JSON.stringify('/tmp/'+n+'.csv')}, stringsAsFactors=FALSE), envir=.nlstat_env)`);
+        }
       }
       await refreshSchema();
       const restored = (proj.blocks||[]).map((b,i)=>({ id:'b'+(++idCounter.current), index:i+1,
         summary:b.summary, code:b.code, label:b.label||'', status:b.status||'ok', formula:b.formula||'', newline:b.newline||false, userMemo:b.userMemo||'' }));
-      setBlocks(restored); setNewNames([]);
+      setBlocks(restored); setNewNames([]); setCodeTabs([{ id:'code1', name:'Code 1', code:'', savedCode:'', blockId:null }]); setActiveCodeTab('code1');
       setDatasetKinds(proj.datasetKinds || Object.fromEntries(Object.keys(proj.datasets||{}).map(n => [n, 'uploaded'])));
       setDatasetNotes(proj.datasetNotes || {});
-      pushLog({ head:`[${now()}] import`, text:`Project loaded: ${restored.length} blocks, ${Object.keys(proj.datasets||{}).length} datasets. Rerun a block to refresh its output.` });
+      pushLog({ head:`[${now()}] import`, text:`Project loaded: ${restored.length} blocks, ${Object.keys(window._dsCache||{}).length} object(s). Rerun a block to refresh its output.` });
     } catch(err){ alert('Import failed: '+(err.message||err)); }
     setBusy(false);
   }
@@ -2849,7 +2969,7 @@ ${code || '(none)'}` });
         h('div', { className:'ehead' }, en.head),
         h('pre', { className:'terminal-pre' + (en.error ? ' err' : '') }, en.text || '(empty)'),
         en.code && h('details', { className:'technical-log' }, h('summary', null, 'Executed code'), h('pre', null, en.code))))
-        : h('span', { className:'placeholder' }, 'Raw WebR terminal output will appear here after running R code.'));
+        : h('span', { className:'placeholder' }, 'Raw WebR console output will appear here after running R code.'));
   }
 
   const lowerLeftPane = promptCodeSwapped ? renderRCodePane() : renderPromptPane();
@@ -2900,11 +3020,11 @@ ${code || '(none)'}` });
       h('div', { className:'vsplit', style:{flex:'1 1 auto'} },
         h('div', { className:'hsplit', style:{flex:'1 1 auto'} },
           h('div', { className:'window', style:{flex:'1 1 58%'} },
-            h('div', { className:'titlebar' }, h('span',{className:'dot'}), showTerminal ? 'Terminal' : 'Results',
+            h('div', { className:'titlebar' }, h('span',{className:'dot'}), showTerminal ? 'Console' : 'Results',
               h('span',{className:'grow'}),
-              h('button',{className:'tbtn text-tbtn' + (showTerminal ? ' active' : ''), title:'Show raw WebR terminal output', onClick:()=>setShowTerminal(v=>!v)},'Terminal'),
+              h('button',{className:'tbtn text-tbtn' + (showTerminal ? ' active' : ''), title:'Show raw WebR console output', onClick:()=>setShowTerminal(v=>!v)},'Console'),
               h('button',{className:'tbtn', title:'Clear', onClick:()=>showTerminal ? setTerminalEntries([]) : setResultEntries([])},'⌫'),
-              h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen(showTerminal ? 'Terminal' : 'Results', showTerminal ? 'terminal' : 'result')},'⛶')),
+              h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen(showTerminal ? 'Console' : 'Results', showTerminal ? 'terminal' : 'result')},'⛶')),
             h('div', { className:'content' },
               showTerminal ? renderTerminalPane() : h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
           h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
@@ -2993,7 +3113,8 @@ ${code || '(none)'}` });
           ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`) ]
         : ctx.kind==='blocks-selected'
           ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }},`Delete ${selectedIds.length} blocks`) ]
-          : [ h('div',{key:1,className:'item danger', onClick:()=>{ if (selectedIds.length > 1 && selectedIds.includes(ctx.id)) deleteSelectedBlocks(); else deleteBlock(ctx.id); setCtx(null); }}, selectedIds.length > 1 && selectedIds.includes(ctx.id) ? `Delete ${selectedIds.length} blocks` : 'Delete block') ])
+          : [ h('div',{key:1,className:'item', onClick:()=>{ openBlockInRCodeTab(ctx.id); setCtx(null); }}, h('span',{className:'ico'},'✎'), 'Edit mode'),
+              h('div',{key:2,className:'item danger', onClick:()=>{ if (selectedIds.length > 1 && selectedIds.includes(ctx.id)) deleteSelectedBlocks(); else deleteBlock(ctx.id); setCtx(null); }}, selectedIds.length > 1 && selectedIds.includes(ctx.id) ? `Delete ${selectedIds.length} blocks` : 'Delete block') ])
   );
 }
 
@@ -3126,7 +3247,7 @@ function dsItem(n, info, kind, selected, fns) {
     onDoubleClick:e=>{ e.preventDefault(); e.stopPropagation(); fns.showPreview(n); },
     onContextMenu:e=>{ e.preventDefault(); if (selected) fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { fns.setSelectedDatasets([]); fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm', title:n}, n),
-    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}`),
+    h('div',{className:'dim'}, `${info.kind || 'object'} · ${info.shape[0]} × ${info.shape[1]}`),
     h('div',{className:'ds-actions'},
       h('button',{className:'ds-ico', title:'Preview', onMouseDown:stop, onClick:e=>{stop(e); fns.showPreview(n);}}, '◉'),
       h('button',{className:'ds-ico note-btn', title:'Memo', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetNote(n);}}, (fns.datasetNotes && fns.datasetNotes[n]) ? '📝' : '✎'),
