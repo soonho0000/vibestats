@@ -498,10 +498,24 @@
 
 
   /* R Code tabs, prompt/code switch, and terminal view */
-  .code-tabs { flex:0 0 auto; display:flex; align-items:flex-end; gap:0; padding:7px 8px 0; border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--panel-2) 46%, var(--bg)); overflow-x:auto; }
+  .code-tabs {
+    flex:0 0 auto; display:flex; align-items:flex-end; gap:0;
+    padding:2px 8px 0; border-bottom:1px solid var(--line);
+    background:color-mix(in srgb, var(--panel-2) 46%, var(--bg)); overflow-x:auto;
+  }
   .code-tabs .grow { flex:1; min-width:8px; }
-  .tab-add-btn { margin:0 7px 6px 0; }
-  .tab-save-btn { margin:0 0 6px 8px; }
+  .tab-control-btn {
+    height:24px !important; min-width:34px !important; padding:0 9px !important;
+    margin:0 0 5px 7px !important; border-radius:999px !important;
+    border:1px solid var(--line-bright) !important;
+    background:linear-gradient(180deg, var(--panel-2), var(--panel)) !important;
+    color:var(--ink-dim) !important; font-family:var(--mono) !important;
+    font-size:11px !important; font-weight:700 !important; line-height:1 !important;
+    display:inline-flex !important; align-items:center !important; justify-content:center !important;
+    cursor:pointer; box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 1px 4px rgba(0,0,0,.12);
+  }
+  .tab-control-btn:hover { color:var(--accent) !important; border-color:var(--accent) !important; transform:translateY(-1px); }
+  .tab-save-btn { min-width:58px !important; }
   .code-tab {
     position:relative; display:inline-flex; align-items:center; gap:6px;
     max-width:118px; min-width:74px; height:27px; padding:0 7px 0 12px;
@@ -604,9 +618,18 @@
 
 
   /* Compact prompt actions and unified title buttons */
-  .nl-actions { flex:0 0 132px !important; gap:6px !important; }
-  .nl-actions .analyze-btn { min-width:78px !important; flex:1 1 78px !important; padding:0 8px !important; }
-  .nl-actions .rcode-btn { min-width:48px !important; flex:0 0 48px !important; padding:0 6px !important; }
+  .prompt-window .nl-row { gap:8px !important; }
+  .prompt-window .nl-input.prompt-input { flex:1 1 auto !important; width:calc(100% - 84px) !important; }
+  .nl-actions {
+    flex:0 0 74px !important; width:74px !important; min-width:74px !important;
+    display:flex !important; flex-direction:column !important; gap:6px !important; align-self:stretch !important;
+  }
+  .nl-actions .analyze-btn, .nl-actions .rcode-btn {
+    min-width:0 !important; width:74px !important; flex:1 1 0 !important;
+    padding:0 5px !important; font-size:calc(10.5px * var(--font-scale)) !important;
+    border-radius:10px !important; white-space:nowrap !important;
+  }
+  .nl-actions .analyze-btn .ico { display:none !important; }
   .window > .titlebar .tbtn, .modal h3 .x, .modal h3 .max, .modal-edit-btn {
     height:24px !important; min-width:28px !important; padding:0 8px !important;
     display:inline-flex !important; align-items:center !important; justify-content:center !important;
@@ -1939,7 +1962,7 @@ function App() {
   const [blocks, setBlocks] = useState([]);
   const [codeTabs, setCodeTabs] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs') || 'null');
+      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v3') || 'null');
       if (saved && Array.isArray(saved.tabs) && saved.tabs.length) {
         return saved.tabs.slice(0, 5).map((t, i) => ({
           id: t.id || ('code' + (i + 1)),
@@ -1953,7 +1976,7 @@ function App() {
   });
   const [activeCodeTab, setActiveCodeTab] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs') || 'null');
+      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs_v3') || 'null');
       return saved?.active || 'code1';
     } catch(e) { return 'code1'; }
   });
@@ -1969,7 +1992,7 @@ function App() {
   const initialWelcome = {
     id: 0,
     head: '[Guide] Welcome to Vibestats!',
-    text: "1. If you are a first-time user, follow these steps to get started. You may write your request in your native language. This tool runs R directly in your browser using WebR, so no local R installation is required.\n2. To download the example dataset, copy: sample_data <- mtcars\n   paste it into the R Code pane, and click the Run button.\n3. To see the summary statistics, type: 'Show me the summary statistics for sample_data'\n   in the 'Enter prompt' box and click 'Analyze'.\n4. Analyze runs the code immediately. Use the Rcode button if you only want to generate code first, then run it from the R Code pane.\n5. Click one or more datasets on the left to mark them as active, then enter a prompt such as 'regress mpg on hp and cyl'. If Vibestats needs one more detail, it will ask a short coaching question before generating R code."
+    text: "1. If you are a first-time user, follow these steps to get started. You may write your request in your native language. This tool runs R directly in your browser using WebR, so no local R installation is required.\n2. To download the example dataset, copy: sample_data <- mtcars\n   paste it into the R Code pane, and click the Run button.\n3. To see the summary statistics, type: 'Show me the summary statistics for sample_data'\n   in the 'Enter prompt' box and click 'Analyze'.\n4. Analyze runs the code immediately. Use the Rcode button if you only want to generate code first, then run it from the R Code pane.\n5. Enter a prompt such as 'regress mpg on hp and cyl'. If Vibestats needs one more detail, it will ask a short coaching question before generating R code."
   };
   const [resultEntries, setResultEntries] = useState([initialWelcome]);
   const [logEntries, setLogEntries] = useState([initialWelcome]);
@@ -2036,8 +2059,11 @@ function App() {
     if (codeTabs.length <= 1) { alert('At least one R code tab must remain.'); return; }
     const code = String(tab.code || '').trim();
     if (code) {
-      const shouldSave = confirm(`Save the contents of ${tab.name || 'this tab'} as a Block before closing?`);
+      const shouldSave = confirm(`Save the contents of ${tab.name || 'this tab'} as a Block before closing?\n\nOK = Save as Block and close\nCancel = Close without saving`);
       if (shouldSave) saveCodeTabAsBlock(tab);
+    } else {
+      const shouldClose = confirm(`${tab.name || 'This tab'} is empty. Close it?`);
+      if (!shouldClose) return;
     }
     const remaining = codeTabs.filter(t => t.id !== tabId);
     setCodeTabs(remaining);
@@ -2063,7 +2089,7 @@ function App() {
   useEffect(() => { document.documentElement.style.setProperty('--font-scale', String(fontScale)); document.body.style.setProperty('--font-scale', String(fontScale)); localStorage.setItem('vibestats_font_scale', String(fontScale)); }, [fontScale]);
   useEffect(() => {
     if (!codeTabs.find(t => t.id === activeCodeTab) && codeTabs[0]) setActiveCodeTab(codeTabs[0].id);
-    localStorage.setItem('vibestats_code_tabs', JSON.stringify({ tabs:codeTabs, active:activeCodeTab }));
+    localStorage.setItem('vibestats_code_tabs_v3', JSON.stringify({ tabs:codeTabs, active:activeCodeTab }));
   }, [codeTabs, activeCodeTab]);
   function toggleTheme() { setThemeMode(m => m === 'light' ? 'dark' : 'light'); }
   function increaseFont() { setFontScale(v => Math.min(1.45, Math.round((v + 0.08) * 100) / 100)); }
@@ -2732,12 +2758,12 @@ ${code || '(none)'}` });
   function renderRCodeEditor(full=false) {
     return h('div', { className:'rcode-pane' },
       h('div', { className:'code-tabs' },
-        h('button', { className:'tbtn tab-add-btn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
         codeTabs.map(t => h('button', { key:t.id, className:'code-tab' + (t.id === activeCodeTab ? ' active' : '') + ((t.savedCode || '') === (t.code || '') && (t.code || '').trim() ? ' saved' : ''), title:t.name, onClick:()=>setActiveCodeTab(t.id) },
           h('span', { className:'code-tab-label' }, t.name),
           h('span', { className:'code-tab-x', role:'button', title:'Close this R code tab', onClick:e=>{ e.preventDefault(); e.stopPropagation(); closeCodeTab(t.id); } }, '×'))),
+        h('button', { className:'tab-control-btn tab-add-btn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
         h('span', { className:'grow' }),
-        h('button', { className:'tbtn text-tbtn tab-save-btn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save')),
+        h('button', { className:'tab-control-btn tab-save-btn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save')),
       full && h('div', { className:'code-editor-hint' }, h('b', null, activeCodeTabObj.name || 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · code is saved to Blocks when run'),
       h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) }));
   }
