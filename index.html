@@ -498,10 +498,26 @@
 
 
   /* R Code tabs, prompt/code switch, and terminal view */
-  .code-tabs { flex:0 0 auto; display:flex; align-items:center; gap:5px; padding:6px 7px; border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--panel-2) 46%, var(--bg)); overflow-x:auto; }
-  .code-tab { max-width:90px; min-width:58px; height:22px; padding:0 8px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--ink-dim); font-family:var(--mono); font-size:10px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .code-tab.active { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
-  .code-tab.saved::after { content:' ✓'; color:var(--green); }
+  .code-tabs { flex:0 0 auto; display:flex; align-items:flex-end; gap:0; padding:7px 8px 0; border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--panel-2) 46%, var(--bg)); overflow-x:auto; }
+  .code-tabs .grow { flex:1; min-width:8px; }
+  .tab-add-btn { margin:0 7px 6px 0; }
+  .tab-save-btn { margin:0 0 6px 8px; }
+  .code-tab {
+    position:relative; display:inline-flex; align-items:center; gap:6px;
+    max-width:118px; min-width:74px; height:27px; padding:0 7px 0 12px;
+    border:1px solid var(--line); border-bottom:0; border-radius:9px 9px 0 0;
+    background:linear-gradient(180deg, var(--panel-2), var(--panel)); color:var(--ink-dim);
+    font-family:var(--mono); font-size:10px; cursor:pointer; white-space:nowrap;
+    clip-path:polygon(0 100%, 0 18%, 9px 0, calc(100% - 7px) 0, 100% 100%);
+    margin-right:-1px;
+  }
+  .code-tab::before { content:''; position:absolute; left:0; right:0; bottom:0; height:1px; background:var(--line); }
+  .code-tab.active { z-index:2; color:var(--accent); border-color:var(--accent); background:linear-gradient(180deg, var(--accent-dim), var(--panel)); }
+  .code-tab.active::before { background:var(--panel); }
+  .code-tab-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .code-tab.saved .code-tab-label::after { content:' ✓'; color:var(--green); }
+  .code-tab-x { width:16px; height:16px; min-width:16px; padding:0; border:1px solid transparent; border-radius:999px; background:transparent; color:var(--ink-faint); font-family:var(--mono); font-size:11px; line-height:1; cursor:pointer; }
+  .code-tab-x:hover { color:#fff; background:var(--red); border-color:var(--red); }
   .terminal-pre { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--line); border-left:4px solid var(--green); border-radius:8px; padding:10px 12px; color:var(--ink); font-family:var(--mono); }
   .terminal-pre.err { border-left-color:var(--red); }
   .titlebar .tbtn.active { color:var(--accent) !important; border-color:var(--accent) !important; background:var(--accent-dim) !important; }
@@ -585,6 +601,26 @@
     #printArea img { max-width:100% !important; height:auto !important; }
     #printArea .entry-actions, #printArea button { display:none !important; }
   }
+
+
+  /* Compact prompt actions and unified title buttons */
+  .nl-actions { flex:0 0 132px !important; gap:6px !important; }
+  .nl-actions .analyze-btn { min-width:78px !important; flex:1 1 78px !important; padding:0 8px !important; }
+  .nl-actions .rcode-btn { min-width:48px !important; flex:0 0 48px !important; padding:0 6px !important; }
+  .window > .titlebar .tbtn, .modal h3 .x, .modal h3 .max, .modal-edit-btn {
+    height:24px !important; min-width:28px !important; padding:0 8px !important;
+    display:inline-flex !important; align-items:center !important; justify-content:center !important;
+    border-radius:5px !important; border:1px solid var(--line-bright) !important;
+    background:linear-gradient(180deg, var(--panel-2), var(--panel)) !important;
+    color:var(--ink-dim) !important; font-family:var(--mono) !important; font-size:10px !important;
+    line-height:1 !important; box-sizing:border-box !important; cursor:pointer;
+  }
+  .window > .titlebar .tbtn:hover, .modal h3 .x:hover, .modal h3 .max:hover, .modal-edit-btn:hover {
+    color:var(--accent) !important; border-color:var(--accent) !important; background:var(--accent-dim) !important;
+  }
+  .window > .titlebar .tbtn.text-tbtn { width:auto !important; min-width:58px !important; }
+  .window > .titlebar .tbtn.active { color:var(--accent) !important; border-color:var(--accent) !important; background:var(--accent-dim) !important; }
+
 
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 4px; }
@@ -1979,6 +2015,34 @@ function App() {
     setCodeTabs(tabs => tabs.map(t => t.id === activeCodeTab ? { ...t, savedCode:t.code || '' } : t));
     pushLog({ head:`[${now()}] R code saved`, text:`Saved ${activeCodeTabObj.name || 'active tab'} in this browser.` });
   }
+  function saveCodeTabAsBlock(tab) {
+    const code = String(tab?.code || '').trim();
+    if (!code) return;
+    const index = blocksRef.current.length + 1;
+    const id = 'b' + (++idCounter.current);
+    const block = {
+      id, index,
+      summary: `Saved R code from ${tab.name || 'R code tab'}`,
+      code, formula:'', status:'ok', label:'', newline:false,
+      userMemo:'Saved from an R Code tab before closing; not executed at save time.'
+    };
+    setBlocks(bs => [...bs, block]);
+    setActiveId(id);
+    pushLog({ head:`[${now()}] R code tab saved as Block`, text:`${tab.name || 'R code tab'} was saved as Block #${index}.` });
+  }
+  function closeCodeTab(tabId) {
+    const tab = codeTabs.find(t => t.id === tabId);
+    if (!tab) return;
+    if (codeTabs.length <= 1) { alert('At least one R code tab must remain.'); return; }
+    const code = String(tab.code || '').trim();
+    if (code) {
+      const shouldSave = confirm(`Save the contents of ${tab.name || 'this tab'} as a Block before closing?`);
+      if (shouldSave) saveCodeTabAsBlock(tab);
+    }
+    const remaining = codeTabs.filter(t => t.id !== tabId);
+    setCodeTabs(remaining);
+    if (activeCodeTab === tabId && remaining.length) setActiveCodeTab(remaining[remaining.length - 1].id);
+  }
   function pushTerminal(code, text, error=false) {
     setTerminalEntries(es => [...es, { id:++terminalCounter.current, head:`[${now()}] ${error ? 'ERROR' : 'WebR terminal'}`, code:String(code || ''), text:String(text || ''), error:!!error }]);
   }
@@ -2651,19 +2715,11 @@ ${code || '(none)'}` });
   const dsNames = Object.keys(schema);
 
   function renderPromptPane() {
-    return h('div', { className:'window prompt-window', style:{flex:'0 0 245px'} },
+    return h('div', { className:'window prompt-window', style:{flex:'1 1 48%'} },
       h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'}),
         h('button', { className:'tbtn text-tbtn', title:'Switch Prompt and R Code positions', onClick:()=>setPromptCodeSwapped(v=>!v) }, 'Switch')),
       h('div', { className:'content', style:{overflow:'auto'} },
         h('div', { className:'nl-box' },
-          h('div', { className:'active-ds-bar' },
-            activeDatasets.length ? h(React.Fragment, null,
-              h('span', { className:'active-label' }, activeDatasets.length === 1 ? 'Using dataset:' : 'Using datasets:'),
-              activeDatasets.map(n => h('span', { key:n, className:'active-ds-chip', title:n },
-                h('span', { className:'active-name' }, n),
-                h('button', { className:'active-chip-x', title:'Remove this dataset from active selection', onClick:e=>{ e.preventDefault(); e.stopPropagation(); toggleActiveDataset(n); } }, '×'))),
-              h('button', { className:'active-clear', onClick:clearActiveDatasets, title:'Clear active datasets' }, 'clear'))
-              : 'No active dataset selected. Click one or more datasets on the left to focus prompts.'),
           h('div', { className:'nl-row' },
             h('textarea', { className:'nl-input prompt-input', ref:promptRef, placeholder:'Enter prompt', rows:3,
               onKeyDown:e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onAnalyzePrompt(); } } }),
@@ -2676,20 +2732,20 @@ ${code || '(none)'}` });
   function renderRCodeEditor(full=false) {
     return h('div', { className:'rcode-pane' },
       h('div', { className:'code-tabs' },
-        codeTabs.map(t => h('button', { key:t.id, className:'code-tab' + (t.id === activeCodeTab ? ' active' : '') + ((t.savedCode || '') === (t.code || '') && (t.code || '').trim() ? ' saved' : ''), title:t.name, onClick:()=>setActiveCodeTab(t.id) }, t.name)),
+        h('button', { className:'tbtn tab-add-btn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
+        codeTabs.map(t => h('button', { key:t.id, className:'code-tab' + (t.id === activeCodeTab ? ' active' : '') + ((t.savedCode || '') === (t.code || '') && (t.code || '').trim() ? ' saved' : ''), title:t.name, onClick:()=>setActiveCodeTab(t.id) },
+          h('span', { className:'code-tab-label' }, t.name),
+          h('span', { className:'code-tab-x', role:'button', title:'Close this R code tab', onClick:e=>{ e.preventDefault(); e.stopPropagation(); closeCodeTab(t.id); } }, '×'))),
         h('span', { className:'grow' }),
-        h('button', { className:'tbtn text-tbtn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save'),
-        h('button', { className:'tbtn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+')),
+        h('button', { className:'tbtn text-tbtn tab-save-btn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save')),
       full && h('div', { className:'code-editor-hint' }, h('b', null, activeCodeTabObj.name || 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · code is saved to Blocks when run'),
       h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) }));
   }
 
   function renderRCodePane() {
-    return h('div', { className:'window', style:{flex:'0 0 33%'} },
+    return h('div', { className:'window', style:{flex:'1 1 52%'} },
       h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'R Code', h('span',{className:'grow'}),
         h('button', { className:'tbtn text-tbtn', title:'Switch Prompt and R Code positions', onClick:()=>setPromptCodeSwapped(v=>!v) }, 'Switch'),
-        h('button', { className:'tbtn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
-        h('button', { className:'tbtn text-tbtn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save'),
         h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
         h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane')},'⛶')),
       h('div', { className:'content' }, renderRCodeEditor(false)));
@@ -2704,8 +2760,8 @@ ${code || '(none)'}` });
         : h('span', { className:'placeholder' }, 'Raw WebR terminal output will appear here after running R code.'));
   }
 
-  const centerLowerPane = promptCodeSwapped ? renderRCodePane() : renderPromptPane();
-  const rightLowerPane = promptCodeSwapped ? renderPromptPane() : renderRCodePane();
+  const lowerLeftPane = promptCodeSwapped ? renderRCodePane() : renderPromptPane();
+  const lowerRightPane = promptCodeSwapped ? renderPromptPane() : renderRCodePane();
 
   return h('div', { style:{height:'100%'} },
     // Menu bar
@@ -2750,32 +2806,31 @@ ${code || '(none)'}` });
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h') }),
 
       h('div', { className:'vsplit', style:{flex:'1 1 auto'} },
-        h('div', { className:'window', style:{flex:'1 1 auto'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), showTerminal ? 'Terminal' : 'Results',
-            h('span',{className:'grow'}),
-            h('button',{className:'tbtn text-tbtn' + (showTerminal ? ' active' : ''), title:'Show raw WebR terminal output', onClick:()=>setShowTerminal(v=>!v)},'Terminal'),
-            h('button',{className:'tbtn', title:'Clear', onClick:()=>showTerminal ? setTerminalEntries([]) : setResultEntries([])},'🧹'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen(showTerminal ? 'Terminal' : 'Results', showTerminal ? 'terminal' : 'result')},'⛶')),
-          h('div', { className:'content' },
-            showTerminal ? renderTerminalPane() : h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
+        h('div', { className:'hsplit', style:{flex:'1 1 auto'} },
+          h('div', { className:'window', style:{flex:'1 1 58%'} },
+            h('div', { className:'titlebar' }, h('span',{className:'dot'}), showTerminal ? 'Terminal' : 'Results',
+              h('span',{className:'grow'}),
+              h('button',{className:'tbtn text-tbtn' + (showTerminal ? ' active' : ''), title:'Show raw WebR terminal output', onClick:()=>setShowTerminal(v=>!v)},'Terminal'),
+              h('button',{className:'tbtn', title:'Clear', onClick:()=>showTerminal ? setTerminalEntries([]) : setResultEntries([])},'⌫'),
+              h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen(showTerminal ? 'Terminal' : 'Results', showTerminal ? 'terminal' : 'result')},'⛶')),
+            h('div', { className:'content' },
+              showTerminal ? renderTerminalPane() : h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
+          h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
+          h('div', { className:'window', style:{flex:'0 0 360px'} },
+            h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
+              h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — fixed order · drag down for new row'),
+              h('span',{className:'grow'}),
+              h('button',{className:'tbtn text-tbtn', title:'Export R code', onClick:exportRCode},'rcode'),
+              h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Blocks','blocks')},'⛶')),
+            h('div', { className:'content' },
+              h('div', { className:'blocks-scroll', onMouseDown:beginBlockAreaSelect, onContextMenu:e=>{ if(selectedIds.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'blocks-selected'}); } } },
+                blocks.length ? h('div',{className:'blocks-flow'}, renderBlocksFlow(blocks, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds}))
+                  : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run".'))))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
-        centerLowerPane),
-
-      h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
-
-      h('div', { className:'vsplit', style:{flex:'0 0 360px'} },
-        h('div', { className:'window', style:{flex:'2 1 auto'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
-            h('span',{style:{textTransform:'none',letterSpacing:0,color:'var(--ink-faint)'}},' — fixed order · drag down for new row'),
-            h('span',{className:'grow'}),
-            h('button',{className:'tbtn text-tbtn', title:'Export R code', onClick:exportRCode},'rcode'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Blocks','blocks')},'⛶')),
-          h('div', { className:'content' },
-            h('div', { className:'blocks-scroll', onMouseDown:beginBlockAreaSelect, onContextMenu:e=>{ if(selectedIds.length){ e.preventDefault(); setCtx({x:e.clientX,y:e.clientY,kind:'blocks-selected'}); } } },
-              blocks.length ? h('div',{className:'blocks-flow'}, renderBlocksFlow(blocks, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds}))
-                : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run".')))),
-        h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
-        rightLowerPane ) ),
+        h('div', { className:'hsplit', style:{flex:'0 0 260px'} },
+          lowerLeftPane,
+          h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
+          lowerRightPane)) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
@@ -2970,16 +3025,15 @@ function dsItem(n, info, kind, selected, fns) {
   const clickOpen = (e) => {
     if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); fns.setSelectedDatasets(ds=>ds.includes(n)?ds.filter(x=>x!==n):[...ds,n]); return; }
     fns.setSelectedDatasets([]);
-    if (fns.toggleActiveDataset) fns.toggleActiveDataset(n);
   };
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  const isActive = (fns.activeDatasets || []).includes(n);
-  return h('div', { key:n, 'data-name':n, className:'ds-item kind-'+(kind || 'uploaded')+(selected?' selected':'')+(isActive?' active-dataset':''),
+  const isActive = false;
+  return h('div', { key:n, 'data-name':n, className:'ds-item kind-'+(kind || 'uploaded')+(selected?' selected':''),
     onClick:clickOpen,
     onDoubleClick:e=>{ e.preventDefault(); e.stopPropagation(); fns.showPreview(n); },
     onContextMenu:e=>{ e.preventDefault(); if (selected) fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { fns.setSelectedDatasets([]); fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm', title:n}, n),
-    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}${isActive ? ' · using' : ''}`),
+    h('div',{className:'dim'}, `${info.shape[0]} × ${info.shape[1]}`),
     h('div',{className:'ds-actions'},
       h('button',{className:'ds-ico', title:'Preview', onMouseDown:stop, onClick:e=>{stop(e); fns.showPreview(n);}}, '◉'),
       h('button',{className:'ds-ico note-btn', title:'Memo', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetNote(n);}}, (fns.datasetNotes && fns.datasetNotes[n]) ? '📝' : '✎'),
