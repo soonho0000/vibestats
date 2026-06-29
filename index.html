@@ -497,6 +497,16 @@
   }
 
 
+  /* R Code tabs, prompt/code switch, and terminal view */
+  .code-tabs { flex:0 0 auto; display:flex; align-items:center; gap:5px; padding:6px 7px; border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--panel-2) 46%, var(--bg)); overflow-x:auto; }
+  .code-tab { max-width:90px; min-width:58px; height:22px; padding:0 8px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--ink-dim); font-family:var(--mono); font-size:10px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .code-tab.active { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
+  .code-tab.saved::after { content:' ✓'; color:var(--green); }
+  .terminal-pre { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--line); border-left:4px solid var(--green); border-radius:8px; padding:10px 12px; color:var(--ink); font-family:var(--mono); }
+  .terminal-pre.err { border-left-color:var(--red); }
+  .titlebar .tbtn.active { color:var(--accent) !important; border-color:var(--accent) !important; background:var(--accent-dim) !important; }
+
+
   /* Final UI sizing fixes */
   .sheet-toolbar { gap:10px; }
   .sheet-toolbar .modal-edit-btn {
@@ -1041,7 +1051,7 @@ async function executeR(code, allowNewDatasets=false) {
   } else if (!is.null(.eval_out) && isTRUE(.eval_out$visible)) {
     result <- .eval_out$value
   }
-  .resultText <- ""; .resultHtml <- ""; .consoleText <- paste(.console, collapse="\\n"); .savedNames <- character(0); .resultKey <- ""
+  .resultText <- ""; .resultHtml <- ""; .consoleText <- paste(.console, collapse="\\n"); .terminalText <- ""; .savedNames <- character(0); .resultKey <- ""
   .esc_html <- function(x) {
     x <- as.character(x); x[is.na(x)] <- ""
     x <- gsub("&", "&amp;", x, fixed=TRUE)
@@ -1115,13 +1125,15 @@ async function executeR(code, allowNewDatasets=false) {
     }
     .scalar_html(x, title)
   }
+  .printed <- character(0)
   if (!is.null(result)) {
     .printed <- capture.output(print(result))
     .lineCount <- length(.printed)
     .resultHtml <- .obj_html(result, "Result")
     if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
   }
-  paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__SAVED__", paste(.savedNames, collapse=","), "__PLOT__", .plotPath, "__RKEY__", .resultKey)
+  .terminalText <- paste(c(.console, .printed), collapse="\\n")
+  paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__TERMINAL__", .terminalText, "__SAVED__", paste(.savedNames, collapse=","), "__PLOT__", .plotPath, "__RKEY__", .resultKey)
 }
 .vibestats_out <- tryCatch(.vibestats_run(), error=function(e) paste0("__ERR__", conditionMessage(e)))
 .vibestats_out
@@ -1141,12 +1153,13 @@ async function executeR(code, allowNewDatasets=false) {
       }
       throw new Error('R execution error: ' + msg);
     }
-    let resultText = '', resultHtml = '', consoleText = '', savedDataset = '', resultKeyOut = '', plotPathOut = '';
-    const ri = out.indexOf('__RESULT__'), hi = out.indexOf('__HTML__'), ci = out.indexOf('__CONSOLE__'), si = out.indexOf('__SAVED__'), pi = out.indexOf('__PLOT__'), ki = out.indexOf('__RKEY__');
-    if (ri>=0 && hi>=0 && ci>=0 && si>=0 && pi>=0 && ki>=0) {
+    let resultText = '', resultHtml = '', consoleText = '', terminalText = '', savedDataset = '', resultKeyOut = '', plotPathOut = '';
+    const ri = out.indexOf('__RESULT__'), hi = out.indexOf('__HTML__'), ci = out.indexOf('__CONSOLE__'), ti = out.indexOf('__TERMINAL__'), si = out.indexOf('__SAVED__'), pi = out.indexOf('__PLOT__'), ki = out.indexOf('__RKEY__');
+    if (ri>=0 && hi>=0 && ci>=0 && ti>=0 && si>=0 && pi>=0 && ki>=0) {
       resultText = out.slice(ri+10, hi);
       resultHtml = out.slice(hi+8, ci);
-      consoleText = out.slice(ci+11, si);
+      consoleText = out.slice(ci+11, ti);
+      terminalText = out.slice(ti+12, si);
       savedDataset = out.slice(si+9, pi);
       plotPathOut = out.slice(pi+8, ki).trim();
       resultKeyOut = out.slice(ki+8);
@@ -1176,7 +1189,7 @@ async function executeR(code, allowNewDatasets=false) {
       resultText = '';
       if (!consoleText || !consoleText.trim()) consoleText = 'R code ran successfully. No printed result object, console output, or plot was produced.';
     }
-    return { resultText, resultHtml, consoleText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
+    return { resultText, resultHtml, consoleText, terminalText, plot, savedDataset, resultKey:resultKeyOut, newDataset: newOnes.length?newOnes[newOnes.length-1]:null };
   }
   throw new Error('R execution error: still failing after package install');
 }
@@ -1888,7 +1901,29 @@ function App() {
   const [datasetKinds, setDatasetKinds] = useState({});
   const [datasetNotes, setDatasetNotes] = useState({});
   const [blocks, setBlocks] = useState([]);
-  const [codeText, setCodeText] = useState('');
+  const [codeTabs, setCodeTabs] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs') || 'null');
+      if (saved && Array.isArray(saved.tabs) && saved.tabs.length) {
+        return saved.tabs.slice(0, 5).map((t, i) => ({
+          id: t.id || ('code' + (i + 1)),
+          name: t.name || ('Code ' + (i + 1)),
+          code: String(t.code || ''),
+          savedCode: String(t.savedCode || '')
+        }));
+      }
+    } catch(e) {}
+    return [{ id:'code1', name:'Code 1', code:'', savedCode:'' }];
+  });
+  const [activeCodeTab, setActiveCodeTab] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('vibestats_code_tabs') || 'null');
+      return saved?.active || 'code1';
+    } catch(e) { return 'code1'; }
+  });
+  const [promptCodeSwapped, setPromptCodeSwapped] = useState(true);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalEntries, setTerminalEntries] = useState([]);
   const [restate, setRestate] = useState('');
   const [formula, setFormula] = useState('');
   const [parseErr, setParseErr] = useState('');
@@ -1923,11 +1958,49 @@ function App() {
   const onSplit = useSplitter();
   const blocksRef = useRef(blocks); blocksRef.current = blocks;
   const idCounter = useRef(0);
+  const terminalCounter = useRef(0);
+  const activeCodeTabObj = codeTabs.find(t => t.id === activeCodeTab) || codeTabs[0] || { id:'code1', name:'Code 1', code:'', savedCode:'' };
+  const codeText = activeCodeTabObj.code || '';
+  function setCodeText(value) {
+    setCodeTabs(tabs => tabs.map(t => {
+      if (t.id !== activeCodeTab) return t;
+      const nextCode = typeof value === 'function' ? value(t.code || '') : value;
+      return { ...t, code: String(nextCode || '') };
+    }));
+  }
+  function addCodeTab() {
+    if (codeTabs.length >= 5) { alert('You can create up to 5 R code tabs.'); return; }
+    const id = 'code' + Date.now() + '_' + Math.floor(Math.random()*10000);
+    const tab = { id, name:'Code ' + (codeTabs.length + 1), code:'', savedCode:'' };
+    setCodeTabs(tabs => [...tabs, tab].slice(0, 5));
+    setActiveCodeTab(id);
+  }
+  function saveActiveCodeTab() {
+    setCodeTabs(tabs => tabs.map(t => t.id === activeCodeTab ? { ...t, savedCode:t.code || '' } : t));
+    pushLog({ head:`[${now()}] R code saved`, text:`Saved ${activeCodeTabObj.name || 'active tab'} in this browser.` });
+  }
+  function pushTerminal(code, text, error=false) {
+    setTerminalEntries(es => [...es, { id:++terminalCounter.current, head:`[${now()}] ${error ? 'ERROR' : 'WebR terminal'}`, code:String(code || ''), text:String(text || ''), error:!!error }]);
+  }
+  function terminalTextFromResult(res) {
+    if (!res) return '';
+    if (res.terminalText && String(res.terminalText).trim()) return String(res.terminalText).trim();
+    const parts = [];
+    if (res.consoleText && String(res.consoleText).trim()) parts.push(String(res.consoleText).trim());
+    if (res.resultText && String(res.resultText).trim()) parts.push(String(res.resultText).trim());
+    else if (res.resultHtml && String(res.resultHtml).trim()) parts.push(htmlToText(res.resultHtml));
+    if (res.plot) parts.push('[plot output]');
+    return parts.join('\n');
+  }
 
   const refreshSchema = useCallback(async () => { setSchema({...(await getSchema())}); }, []);
   useEffect(() => { const f=()=>{ setCtx(null); setOpenMenu(null); }; document.addEventListener('click', f); return ()=>document.removeEventListener('click', f); }, []);
   useEffect(() => { document.body.classList.toggle('light', themeMode === 'light'); document.documentElement.classList.toggle('light', themeMode === 'light'); localStorage.setItem('vibestats_theme', themeMode); }, [themeMode]);
   useEffect(() => { document.documentElement.style.setProperty('--font-scale', String(fontScale)); document.body.style.setProperty('--font-scale', String(fontScale)); localStorage.setItem('vibestats_font_scale', String(fontScale)); }, [fontScale]);
+  useEffect(() => {
+    if (!codeTabs.find(t => t.id === activeCodeTab) && codeTabs[0]) setActiveCodeTab(codeTabs[0].id);
+    localStorage.setItem('vibestats_code_tabs', JSON.stringify({ tabs:codeTabs, active:activeCodeTab }));
+  }, [codeTabs, activeCodeTab]);
   function toggleTheme() { setThemeMode(m => m === 'light' ? 'dark' : 'light'); }
   function increaseFont() { setFontScale(v => Math.min(1.45, Math.round((v + 0.08) * 100) / 100)); }
   function resetFont() { setFontScale(1); }
@@ -2100,7 +2173,6 @@ function App() {
     dispatchOutput(rr.res, `#${index} ${rr.summary||generatedSummary||''}`.trim(), rr.code, rr.formula || generatedFormula || '', false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
     if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
-    if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
     hideProgress(); setBusy(false);
   }
 
@@ -2133,7 +2205,6 @@ function App() {
           setActiveId(id);
           dispatchOutput(rr.res, `#${index} ${rr.summary||a.summary||''}`.trim(), rr.code, rr.formula || a.formula || '', false, outputLanguageInstruction(text));
           if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
-          if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; }
         }
       }
     }
@@ -2158,7 +2229,15 @@ function App() {
   }
 
   async function runCodeCore(code, allowNewDatasets=false) {
-    return await executeR(code, allowNewDatasets).catch(e => ({ error: e.message||String(e) }));
+    try {
+      const res = await executeR(code, allowNewDatasets);
+      pushTerminal(code, terminalTextFromResult(res) || '(no WebR terminal output)', false);
+      return res;
+    } catch(e) {
+      const msg = e.message || String(e);
+      pushTerminal(code, msg, true);
+      return { error: msg };
+    }
   }
 
   async function runCodeWithRepair(initialCode, summary, allowNewDatasets=false) {
@@ -2228,7 +2307,6 @@ ${currentCode}` });
     dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code, rr.formula || formula, false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
     if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
-    if (!rr.res.error && !rr.repaired) { promptRef.current.value=''; setCodeText(''); setRestate(''); setFormula(''); }
     hideProgress(); setBusy(false);
   }
 
@@ -2516,6 +2594,7 @@ ${code || '(none)'}` });
     if (kind==='result') setModal({ title, full:true, streamKind:'result', entries:resultEntries });
     else if (kind==='blocks') setModal({ title, full:true, blocksView:true });
     else if (kind==='datasets') setModal({ title, full:true, datasetsView:true });
+    else if (kind==='terminal') setModal({ title, full:true, terminalView:true });
     else if (kind==='rcodepane') setModal({ title, full:true, rcodePane:true });
   }
 
@@ -2571,6 +2650,63 @@ ${code || '(none)'}` });
 
   const dsNames = Object.keys(schema);
 
+  function renderPromptPane() {
+    return h('div', { className:'window prompt-window', style:{flex:'0 0 245px'} },
+      h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'}),
+        h('button', { className:'tbtn text-tbtn', title:'Switch Prompt and R Code positions', onClick:()=>setPromptCodeSwapped(v=>!v) }, 'Switch')),
+      h('div', { className:'content', style:{overflow:'auto'} },
+        h('div', { className:'nl-box' },
+          h('div', { className:'active-ds-bar' },
+            activeDatasets.length ? h(React.Fragment, null,
+              h('span', { className:'active-label' }, activeDatasets.length === 1 ? 'Using dataset:' : 'Using datasets:'),
+              activeDatasets.map(n => h('span', { key:n, className:'active-ds-chip', title:n },
+                h('span', { className:'active-name' }, n),
+                h('button', { className:'active-chip-x', title:'Remove this dataset from active selection', onClick:e=>{ e.preventDefault(); e.stopPropagation(); toggleActiveDataset(n); } }, '×'))),
+              h('button', { className:'active-clear', onClick:clearActiveDatasets, title:'Clear active datasets' }, 'clear'))
+              : 'No active dataset selected. Click one or more datasets on the left to focus prompts.'),
+          h('div', { className:'nl-row' },
+            h('textarea', { className:'nl-input prompt-input', ref:promptRef, placeholder:'Enter prompt', rows:3,
+              onKeyDown:e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onAnalyzePrompt(); } } }),
+            h('div', { className:'nl-actions' },
+              h('button', { className:'nl-go action-btn primary analyze-btn', onClick:onAnalyzePrompt, disabled:busy }, busy?'…':h(React.Fragment,null,h('span',{className:'ico'},'✦'),h('span',null,'Analyze'))),
+              h('button', { className:'nl-go action-btn rcode-btn', onClick:onRCodePrompt, disabled:busy, title:'Generate R code without running' }, 'Rcode'))),
+          parseErr && h('div', { className:'parse-err' }, parseErr))));
+  }
+
+  function renderRCodeEditor(full=false) {
+    return h('div', { className:'rcode-pane' },
+      h('div', { className:'code-tabs' },
+        codeTabs.map(t => h('button', { key:t.id, className:'code-tab' + (t.id === activeCodeTab ? ' active' : '') + ((t.savedCode || '') === (t.code || '') && (t.code || '').trim() ? ' saved' : ''), title:t.name, onClick:()=>setActiveCodeTab(t.id) }, t.name)),
+        h('span', { className:'grow' }),
+        h('button', { className:'tbtn text-tbtn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save'),
+        h('button', { className:'tbtn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+')),
+      full && h('div', { className:'code-editor-hint' }, h('b', null, activeCodeTabObj.name || 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · code is saved to Blocks when run'),
+      h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) }));
+  }
+
+  function renderRCodePane() {
+    return h('div', { className:'window', style:{flex:'0 0 33%'} },
+      h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'R Code', h('span',{className:'grow'}),
+        h('button', { className:'tbtn text-tbtn', title:'Switch Prompt and R Code positions', onClick:()=>setPromptCodeSwapped(v=>!v) }, 'Switch'),
+        h('button', { className:'tbtn', onClick:addCodeTab, title:'Add R code tab, up to 5' }, '+'),
+        h('button', { className:'tbtn text-tbtn', onClick:saveActiveCodeTab, title:'Save the active R code tab in this browser' }, 'Save'),
+        h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
+        h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane')},'⛶')),
+      h('div', { className:'content' }, renderRCodeEditor(false)));
+  }
+
+  function renderTerminalPane() {
+    return h('div', { className:'stream terminal-stream' },
+      terminalEntries.length ? terminalEntries.map(en => h('div', { key:en.id, className:'entry' + (en.error ? ' err' : '') },
+        h('div', { className:'ehead' }, en.head),
+        h('pre', { className:'terminal-pre' + (en.error ? ' err' : '') }, en.text || '(empty)'),
+        en.code && h('details', { className:'technical-log' }, h('summary', null, 'Executed code'), h('pre', null, en.code))))
+        : h('span', { className:'placeholder' }, 'Raw WebR terminal output will appear here after running R code.'));
+  }
+
+  const centerLowerPane = promptCodeSwapped ? renderRCodePane() : renderPromptPane();
+  const rightLowerPane = promptCodeSwapped ? renderPromptPane() : renderRCodePane();
+
   return h('div', { style:{height:'100%'} },
     // Menu bar
     h('div', { className:'menubar', onClick:e=>e.stopPropagation() },
@@ -2615,33 +2751,16 @@ ${code || '(none)'}` });
 
       h('div', { className:'vsplit', style:{flex:'1 1 auto'} },
         h('div', { className:'window', style:{flex:'1 1 auto'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Results',
+          h('div', { className:'titlebar' }, h('span',{className:'dot'}), showTerminal ? 'Terminal' : 'Results',
             h('span',{className:'grow'}),
-            h('button',{className:'tbtn', title:'Clear', onClick:()=>setResultEntries([])},'🧹'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('Results','result')},'⛶')),
+            h('button',{className:'tbtn text-tbtn' + (showTerminal ? ' active' : ''), title:'Show raw WebR terminal output', onClick:()=>setShowTerminal(v=>!v)},'Terminal'),
+            h('button',{className:'tbtn', title:'Clear', onClick:()=>showTerminal ? setTerminalEntries([]) : setResultEntries([])},'🧹'),
+            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen(showTerminal ? 'Terminal' : 'Results', showTerminal ? 'terminal' : 'result')},'⛶')),
           h('div', { className:'content' },
-            h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
+            showTerminal ? renderTerminalPane() : h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
-        h('div', { className:'window prompt-window', style:{flex:'0 0 245px'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Prompt', h('span',{className:'grow'})),
-          h('div', { className:'content', style:{overflow:'auto'} },
-            h('div', { className:'nl-box' },
-              h('div', { className:'active-ds-bar' },
-                activeDatasets.length ? h(React.Fragment, null,
-                  h('span', { className:'active-label' }, activeDatasets.length === 1 ? 'Using dataset:' : 'Using datasets:'),
-                  activeDatasets.map(n => h('span', { key:n, className:'active-ds-chip', title:n },
-                    h('span', { className:'active-name' }, n),
-                    h('button', { className:'active-chip-x', title:'Remove this dataset from active selection', onClick:e=>{ e.preventDefault(); e.stopPropagation(); toggleActiveDataset(n); } }, '×'))),
-                  h('button', { className:'active-clear', onClick:clearActiveDatasets, title:'Clear active datasets' }, 'clear'))
-                  : 'No active dataset selected. Click one or more datasets on the left to focus prompts.'),
-              h('div', { className:'nl-row' },
-                h('textarea', { className:'nl-input prompt-input', ref:promptRef, placeholder:'Enter prompt', rows:3,
-                  onKeyDown:e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onAnalyzePrompt(); } } }),
-                h('div', { className:'nl-actions' },
-                  h('button', { className:'nl-go action-btn primary analyze-btn', onClick:onAnalyzePrompt, disabled:busy }, busy?'…':h(React.Fragment,null,h('span',{className:'ico'},'✦'),h('span',null,'Analyze'))),
-                  h('button', { className:'nl-go action-btn rcode-btn', onClick:onRCodePrompt, disabled:busy, title:'Generate R code without running' }, 'Rcode'))),
-              parseErr && h('div', { className:'parse-err' }, parseErr)))))
-    ,
+        centerLowerPane),
+
       h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
 
       h('div', { className:'vsplit', style:{flex:'0 0 360px'} },
@@ -2656,13 +2775,7 @@ ${code || '(none)'}` });
               blocks.length ? h('div',{className:'blocks-flow'}, renderBlocksFlow(blocks, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds}))
                 : h('div',{className:'blocks-empty'},'No blocks yet.',h('br'),'Run code with "Run".')))),
         h('div', { className:'gutter row', onMouseDown:e=>onSplit(e,'v','next') }),
-        h('div', { className:'window', style:{flex:'0 0 33%'} },
-          h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'R Code', h('span',{className:'grow'}),
-            h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
-            h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane')},'⛶')),
-          h('div', { className:'content' },
-            h('div', { className:'rcode-pane' },
-              h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) })))) ) ),
+        rightLowerPane ) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
@@ -2691,6 +2804,7 @@ ${code || '(none)'}` });
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
           : modal.productInfo ? h('div',{className:'mbody'}, h(ProductInfo))
           : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSavePdf: modal.streamKind==='result'?onSavePdf:null, onCoachOption:onCoachOption, onToDataset: modal.streamKind==='result'?onToDataset:null}))
+          : modal.terminalView ? h('div',{className:'mbody',style:{padding:0}}, renderTerminalPane())
           : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
             h('div', { className:'ds-toolbar' },
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
@@ -2701,9 +2815,7 @@ ${code || '(none)'}` });
                 : h('div',{className:'ds-empty'},'No data loaded',h('br'),h('span',{style:{fontSize:'10px'}},'right-click: save/preview/delete'))))
           : modal.blocksView ? h('div',{className:'mbody',style:{padding:'14px'}}, h('div',{className:'blocks-flow'}, renderBlocksFlow(blocksRef.current, activeId, selectedIds, {setLabel,rerun,showBlockInfo,setCtx,toggleNewline,setActiveId,setSelectedIds})))
           : modal.rcodePane ? h('div',{className:'mbody'},
-            h('div', { className:'code-editor-shell' },
-              h('div', { className:'code-editor-hint' }, h('b', null, 'R Code Editor'), ' · Tab inserts spaces · Ctrl/⌘+Enter runs code · code is saved to Blocks when run'),
-              h('textarea', { className:'rcode-textarea', value:codeText, placeholder:'R code will be automatically saved to Blocks.', spellCheck:false, onKeyDown:handleCodeKeyDown, onChange:e=>setCodeText(e.target.value) })))
+            h('div', { className:'code-editor-shell' }, renderRCodeEditor(true)))
           : modal.html ? h('div',{className:'mbody', dangerouslySetInnerHTML:{__html:modal.html}})
           : h('div',{className:'mbody'}, modal.body),
         !(modal.noteDataset || modal.datasetEdit || modal.newDataset || modal.blockEdit) && h('div', { className:'mfoot' }, h('button',{onClick:()=>setModal(null)},'Close')))),
