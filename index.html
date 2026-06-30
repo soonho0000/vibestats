@@ -115,6 +115,7 @@
   .console-table td, .console-table th { border:1px solid var(--line); padding:3px 9px; text-align:left; white-space:nowrap; }
   .console-table th { background:var(--panel-2); color:var(--ink); font-weight:700; }
   .console-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .plot-img { max-width:100%; height:auto; display:block; margin:8px 0; border:1px solid var(--line); border-radius:6px; background:#fff; }
   .html-stream .result-html-wrap > div > pre.terminal-pre { margin:2px 0; }
 
   .ds-list.ds-list-full { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); padding: 9px 13px 13px; }
@@ -2378,8 +2379,8 @@ function App() {
     setActiveCodeTab(id);
     setModal(null);
   }
-  function pushTerminal(code, text, error=false) {
-    setTerminalEntries(es => [...es, { id:++terminalCounter.current, head:`[${now()}] ${error ? 'ERROR' : 'WebR console'}`, code:String(code || ''), text:String(text || ''), error:!!error }]);
+  function pushTerminal(code, text, error=false, plot=null) {
+    setTerminalEntries(es => [...es, { id:++terminalCounter.current, head:`[${now()}] ${error ? 'ERROR' : 'WebR console'}`, code:String(code || ''), text:String(text || ''), error:!!error, plot:plot || null }]);
   }
   function terminalTextFromResult(res) {
     if (!res) return '';
@@ -2388,7 +2389,6 @@ function App() {
     if (res.consoleText && String(res.consoleText).trim()) parts.push(String(res.consoleText).trim());
     if (res.resultText && String(res.resultText).trim()) parts.push(String(res.resultText).trim());
     else if (res.resultHtml && String(res.resultHtml).trim()) parts.push(htmlToText(res.resultHtml));
-    if (res.plot) parts.push('[plot output]');
     return parts.join('\n');
   }
 
@@ -2644,7 +2644,7 @@ function App() {
   async function runCodeCore(code, allowNewDatasets=false) {
     try {
       const res = await executeR(code, allowNewDatasets);
-      pushTerminal(code, terminalTextFromResult(res) || '(no WebR console output)', false);
+      pushTerminal(code, terminalTextFromResult(res) || '(no WebR console output)', false, res.plot || null);
       return res;
     } catch(e) {
       const msg = e.message || String(e);
@@ -3180,7 +3180,10 @@ ${code || '(none)'}` });
     return h('div', { className:'stream terminal-stream' },
       terminalEntries.length ? terminalEntries.map(en => h('div', { key:en.id, className:'entry' + (en.error ? ' err' : '') },
         h('div', { className:'ehead' }, en.head),
-        h('pre', { className:'terminal-pre' + (en.error ? ' err' : '') }, en.text || '(empty)'),
+        (en.text && en.text.trim() && !(en.plot && /^\(?(no WebR console output|empty)\)?$/i.test(en.text.trim())))
+          ? h('pre', { className:'terminal-pre' + (en.error ? ' err' : '') }, en.text)
+          : (!en.plot ? h('pre', { className:'terminal-pre' + (en.error ? ' err' : '') }, en.text || '(empty)') : null),
+        en.plot && h('img', { className:'plot-img', src:en.plot }),
         en.code && h('details', { className:'technical-log' }, h('summary', null, 'Executed code'), h('pre', null, en.code))))
         : h('span', { className:'placeholder' }, 'Raw WebR console output will appear here after running R code.'));
   }
@@ -3192,8 +3195,12 @@ ${code || '(none)'}` });
     return h('div', { className:'stream html-stream' },
       terminalEntries.length ? terminalEntries.map(en => h('div', { key:en.id, className:'entry' + (en.error ? ' err' : '') },
         h('div', { className:'ehead' }, en.head),
-        h('div', { className:'result-html result-html-wrap' + (en.error ? ' err' : '') },
-          h('div', { dangerouslySetInnerHTML:{ __html: consoleTextToHtml(en.text || '(empty)') } })),
+        (en.text && en.text.trim() && !(en.plot && /^\(?(no WebR console output|empty)\)?$/i.test(en.text.trim())))
+          ? h('div', { className:'result-html result-html-wrap' + (en.error ? ' err' : '') },
+              h('div', { dangerouslySetInnerHTML:{ __html: consoleTextToHtml(en.text) } }))
+          : (!en.plot ? h('div', { className:'result-html result-html-wrap' + (en.error ? ' err' : '') },
+              h('div', { dangerouslySetInnerHTML:{ __html: consoleTextToHtml(en.text || '(empty)') } })) : null),
+        en.plot && h('img', { className:'plot-img', src:en.plot }),
         en.code && h('details', { className:'technical-log' }, h('summary', null, 'Executed code'), h('pre', null, en.code))))
         : h('span', { className:'placeholder' }, 'The HTML view shows the same console output, with numeric blocks arranged into tables.'));
   }
