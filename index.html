@@ -100,7 +100,22 @@
   .ds-item.kind-result { border-left-color: var(--green); }
   .ds-item .nm { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ds-item .dim { color: var(--ink-faint); font-size: 10px; margin-top: 2px; }
+
+  .tree-pane { color:var(--ink); font-family:var(--mono); font-size:calc(12px * var(--font-scale)); line-height:1.55; padding:6px 4px; overflow:auto; height:100%; }
+  .tree-pane details { margin-left:14px; }
+  .tree-pane > details { margin-left:0; }
+  .tree-pane details > summary { cursor:pointer; list-style-position:outside; padding:2px 0; color:var(--ink); display:flex; gap:14px; align-items:baseline; }
+  .tree-pane details > summary:hover { color:var(--accent); }
+  .tree-pane details[open] > summary { color:var(--accent); }
+  .tree-pane .tree-row.leaf { margin-left:30px; padding:2px 0; color:var(--ink-dim); display:flex; gap:14px; align-items:baseline; }
+  .tree-pane .tree-label { flex:0 0 auto; white-space:nowrap; }
+  .tree-pane .tree-value { flex:1 1 auto; min-width:0; color:var(--blue); white-space:pre-wrap; word-break:break-word; opacity:.95; }
   .ds-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 11px; padding: 8px; grid-column: 1 / -1; }
+  .console-table { border-collapse:collapse; margin:6px 0; font-family:var(--mono); font-size:calc(12px * var(--font-scale)); }
+  .console-table td, .console-table th { border:1px solid var(--line); padding:3px 9px; text-align:left; white-space:nowrap; }
+  .console-table th { background:var(--panel-2); color:var(--ink); font-weight:700; }
+  .console-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .html-stream .result-html-wrap > div > pre.terminal-pre { margin:2px 0; }
 
   .ds-list.ds-list-full { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); padding: 9px 13px 13px; }
 
@@ -264,11 +279,6 @@
   body.light .ds-ico { background: rgba(255,255,255,.75); }
   .ds-ico:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
   .ctx .item .ico { display:inline-block; width:20px; text-align:center; margin-right:5px; }
-
-  .ds-tree { margin-top:5px; color:var(--ink-dim); font-family:var(--mono); font-size:10px; line-height:1.35; max-height:92px; overflow:auto; border-top:1px dashed var(--line); padding-top:4px; }
-  .ds-tree details { margin-left:8px; }
-  .ds-tree summary { cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; list-style-position:inside; }
-  .ds-tree .leaf { margin-left:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 
 
@@ -742,11 +752,10 @@ async function bootWebR() {
 }
 
 async function getSchema() {
-  const code = String.raw`local({
+  const code = `local({
     nms <- ls(.nlstat_env); parts <- character(0)
-    nms <- nms[!grepl("^\\.vibestats_result_", nms)]
-    jesc <- function(s) { s <- as.character(s); s[is.na(s)] <- ""; s <- gsub('\\','\\\\', s, fixed=TRUE); s <- gsub('"','\\"', s, fixed=TRUE); s <- gsub('[[:cntrl:]]',' ', s); s }
-    q <- function(x) paste0('"', jesc(x), '"')
+    nms <- nms[!grepl("^\\\\.vibestats_result_", nms)]
+    jesc <- function(s) { s <- gsub('\\\\\\\\','\\\\\\\\\\\\\\\\', s); s <- gsub('"','\\\\\\\\"', s); s <- gsub('[[:cntrl:]]',' ', s); s }
     rtype <- function(col) {
       if (inherits(col,'Date')) return('date')
       if (inherits(col,'POSIXt')) return('datetime')
@@ -763,6 +772,32 @@ async function getSchema() {
       else if (is.numeric(col)) v <- format(round(v,4), trim=TRUE, scientific=FALSE)
       else v <- substr(as.character(v),1,18)
       paste(v, collapse='|')
+    }
+    valpreview <- function(x) {
+      # Short value preview for the tree's right column (RStudio-style).
+      if (is.null(x)) return('NULL')
+      if (is.function(x)) return('function')
+      if (is.data.frame(x)) return(paste0(nrow(x), ' obs. of ', ncol(x), ' variables'))
+      if (is.factor(x)) {
+        lv <- levels(x)
+        return(paste0('Factor w/ ', length(lv), ' levels: ', paste(utils::head(lv,4), collapse=', ')))
+      }
+      if (is.atomic(x)) {
+        n <- length(x)
+        if (n == 0L) return('(empty)')
+        vv <- utils::head(x, 10L)
+        if (is.numeric(vv)) s <- format(round(vv, 4), trim=TRUE, scientific=FALSE)
+        else if (inherits(x,'Date')) s <- format(vv,'%Y-%m-%d')
+        else if (inherits(x,'POSIXt')) s <- format(vv,'%Y-%m-%d %H:%M:%S')
+        else if (is.logical(vv)) s <- as.character(vv)
+        else s <- paste0('"', substr(as.character(vv),1,24), '"')
+        out <- paste(s, collapse=' ')
+        if (n > 10L) out <- paste0(out, ' ...')
+        if (nchar(out) > 90L) out <- paste0(substr(out, 1, 90L), ' ...')
+        return(out)
+      }
+      if (is.list(x)) return(paste0('List of ', length(x)))
+      paste(class(x), collapse='/')
     }
     kind_of <- function(x) {
       if (is.data.frame(x)) return('data.frame')
@@ -781,27 +816,27 @@ async function getSchema() {
       cls <- paste(class(x), collapse='/')
       kd <- kind_of(x)
       dm <- dim_of(x)
-      label <- paste0(nm, ' — ', kd, ' [', dm[1], ifelse(dm[2] > 1L, paste0('x', dm[2]), ''), ']')
+      label <- paste0(nm, ' - ', kd, ' [', dm[1], ifelse(dm[2] > 1L, paste0('x', dm[2]), ''), ']')
       children <- character(0)
       if (depth < max_depth) {
         if (is.data.frame(x)) {
           cn <- names(x)
           if (length(cn)) children <- vapply(seq_along(cn), function(i) {
             col <- x[[i]]
-            paste0('{"name":', q(cn[i]), ',"label":', q(paste0(cn[i], ' — ', rtype(col), ' [', length(col), ']')), ',"kind":', q(rtype(col)), ',"class":', q(paste(class(col), collapse='/')), ',"children":[]}')
+            paste0('{"name":"', jesc(cn[i]), '","label":"', jesc(paste0(cn[i], ' - ', rtype(col), ' [', length(col), ']')), '","value":"', jesc(valpreview(col)), '","kind":"', jesc(rtype(col)), '","class":"', jesc(paste(class(col), collapse='/')), '","children":[]}')
           }, character(1))
         } else if (is.list(x)) {
           nms2 <- names(x); if (is.null(nms2)) nms2 <- paste0('[', seq_along(x), ']')
           nms2[nms2 == ''] <- paste0('[', which(nms2 == ''), ']')
           lim <- min(length(x), 80L)
           if (lim > 0L) children <- vapply(seq_len(lim), function(i) tree_json(x[[i]], nms2[i], depth+1L, max_depth), character(1))
-          if (length(x) > lim) children <- c(children, paste0('{"name":"...","label":', q(paste0('... ', length(x)-lim, ' more items')), ',"kind":"more","class":"","children":[]}'))
+          if (length(x) > lim) children <- c(children, paste0('{"name":"...","label":"', length(x)-lim, ' more items","value":"","kind":"more","class":"","children":[]}'))
         } else if (is.matrix(x) && !is.null(colnames(x))) {
           cn <- colnames(x)
-          children <- vapply(seq_along(cn), function(i) paste0('{"name":', q(cn[i]), ',"label":', q(paste0(cn[i], ' — column [', nrow(x), ']')), ',"kind":"column","class":"","children":[]}'), character(1))
+          children <- vapply(seq_along(cn), function(i) paste0('{"name":"', jesc(cn[i]), '","label":"', jesc(paste0(cn[i], ' - column [', nrow(x), ']')), '","value":"', jesc(valpreview(x[,i])), '","kind":"column","class":"","children":[]}'), character(1))
         }
       }
-      paste0('{"name":', q(nm), ',"label":', q(label), ',"kind":', q(kd), ',"class":', q(cls), ',"shape":[', dm[1], ',', dm[2], '],"children":[', paste(children, collapse=','), ']}')
+      paste0('{"name":"', jesc(nm), '","label":"', jesc(label), '","value":"', jesc(valpreview(x)), '","kind":"', jesc(kd), '","class":"', jesc(cls), '","shape":[', dm[1], ',', dm[2], '],"children":[', paste(children, collapse=','), ']}')
     }
     for (n in nms) { d <- get(n, envir=.nlstat_env)
       cls <- paste(class(d), collapse='/')
@@ -828,18 +863,31 @@ async function getSchema() {
       } }
     paste0("{", paste(parts, collapse=","), "}") })`;
   let schema = {};
-  try { schema = JSON.parse(await webR.evalRString(code)); } catch(e) { console.warn('[Vibestats] schema parse failed', e); }
+  try { schema = JSON.parse(await webR.evalRString(code)); } catch(e) {}
   window._dsCache = schema;
   return schema;
 }
+
 // ===== LLM via secure backend proxy =====
 // Prompt/config is separated from the UI so the LLM behavior can be maintained independently.
 // Prompt caching is still provider-side: the important part is that stable system prompts remain the first messages.
-import {
-  GEMINI_MODEL, GEMINI_PROXY_URL, PROMPT_VERSION, METHOD_REQUIREMENTS,
-  SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, INTERPRET_SYSTEM_PROMPT,
-  SEND_SCHEMA_SAMPLES, SHORT_CONTEXT_CHARS, INTERPRET_RESULT_CHARS, MAX_LLM_CHARS
-} from './vibestats-prompts.js';
+let _promptModule = {};
+try {
+  _promptModule = await import('./vibestats-prompts.js');
+} catch (e) {
+  console.warn('[Vibestats] vibestats-prompts.js was not found. The page will still open, but AI prompt features need that file next to this HTML.', e);
+}
+const GEMINI_MODEL = _promptModule.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_PROXY_URL = _promptModule.GEMINI_PROXY_URL || '';
+const PROMPT_VERSION = _promptModule.PROMPT_VERSION || 'fallback';
+const METHOD_REQUIREMENTS = _promptModule.METHOD_REQUIREMENTS || [];
+const SYSTEM_PROMPT = _promptModule.SYSTEM_PROMPT || 'Return JSON with code, summary, and formula for the requested R analysis.';
+const REPAIR_SYSTEM_PROMPT = _promptModule.REPAIR_SYSTEM_PROMPT || 'Return JSON with corrected R code, summary, formula, and reason.';
+const INTERPRET_SYSTEM_PROMPT = _promptModule.INTERPRET_SYSTEM_PROMPT || 'Interpret the R result clearly.';
+const SEND_SCHEMA_SAMPLES = _promptModule.SEND_SCHEMA_SAMPLES ?? true;
+const SHORT_CONTEXT_CHARS = _promptModule.SHORT_CONTEXT_CHARS || 4000;
+const INTERPRET_RESULT_CHARS = _promptModule.INTERPRET_RESULT_CHARS || 6000;
+const MAX_LLM_CHARS = _promptModule.MAX_LLM_CHARS || 50000;
 
 function formatSchema(s, includeSamples=SEND_SCHEMA_SAMPLES) {
   const k = Object.keys(s);
@@ -1026,6 +1074,7 @@ async function callLLM(messages, jsonMode) {
       : m);
   }
 
+  if (!GEMINI_PROXY_URL) throw new Error('AI backend proxy is not configured. Make sure vibestats-prompts.js is in the same folder as this HTML file.');
   const { systemText, contents } = toGeminiContents(messages);
   const body = {
     provider: 'gemini',
@@ -1324,21 +1373,6 @@ async function executeR(code, allowNewDatasets=false) {
       plotPathOut = out.slice(pi+8, ki).trim();
       resultKeyOut = out.slice(ki+8);
     }
-    // Keep Console and Results semantically identical: Console shows raw text;
-    // Results shows the same text as HTML, plus any richer table/plot rendering.
-    const unifiedConsoleText = (terminalText && String(terminalText).trim())
-      ? String(terminalText).trim()
-      : [consoleText, resultText].filter(x => x && String(x).trim()).join('\n').trim();
-    if (unifiedConsoleText) consoleText = unifiedConsoleText;
-    if (unifiedConsoleText && !resultHtml && resultText && String(resultText).trim()) {
-      resultHtml = '<pre class="result-pre">' + String(resultText).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</pre>';
-    }
-    if (unifiedConsoleText) {
-      const escapedConsole = String(unifiedConsoleText).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-      const consoleHtml = '<details class="technical-log" open><summary>Console</summary><pre>' + escapedConsole + '</pre></details>';
-      if (resultHtml) resultHtml += consoleHtml;
-      else resultHtml = consoleHtml;
-    }
     let plot = null;
     const plotCandidates = [...new Set([plotPathOut, '/tmp/__vibestats_plot001.png', '/tmp/__vibestats_plot.png'].filter(Boolean))];
     for (const plotPath of plotCandidates) {
@@ -1450,7 +1484,7 @@ async function loadDataFile(name, file) {
       .after <- ls(.nlstat_env, all.names=TRUE)
       .new <- setdiff(.after, .before)
       .out <- unique(c(.loaded, .new))
-      .esc <- function(x) { x <- gsub('\\\\','\\\\\\\\', x); x <- gsub('"','\\\\"', x); x }
+      .esc <- function(x) { x <- gsub('\\\\','\\\\\\\\', x, fixed=TRUE); x <- gsub('"','\\\\"', x, fixed=TRUE); x }
       paste0('[', paste0('"', .esc(.out), '"', collapse=','), ']')
     })`);
     await getSchema();
@@ -1734,6 +1768,113 @@ function uiTextForLanguage(key) {
 
 function escHtml(x) {
   return String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Convert raw R console text into HTML, turning aligned numeric blocks (coefficient
+// tables, matrices, data-frame prints, summary() output, etc.) into real HTML tables
+// while leaving prose / single-column lines as plain text. Content is preserved
+// 1:1 with the console; only the visual layout of tabular regions changes.
+function consoleTextToHtml(rawText) {
+  const text = String(rawText ?? '').replace(/\t/g, '    ');
+  if (!text.trim()) return '<pre class="terminal-pre">(empty)</pre>';
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+
+  // Decide if a line participates in a table: it has >=2 tokens separated by 2+ spaces,
+  // or it's a row of mostly-numeric tokens.
+  const isTabular = (line) => {
+    const t = line.replace(/\s+$/,'');
+    if (!t.trim()) return false;
+    if (/ {2,}\S/.test(t) && t.trim().split(/ {2,}/).length >= 2) return true;
+    const toks = t.trim().split(/\s+/);
+    if (toks.length < 2) return false;
+    const num = toks.filter(tk=>/^[-+]?\.?\d/.test(tk)).length;
+    return num >= Math.max(2, Math.ceil(toks.length*0.6));
+  };
+
+  // For a block of consecutive tabular lines, find column boundaries as character
+  // positions that are whitespace in EVERY line (R pads columns to align them).
+  const blockToTable = (block) => {
+    const width = Math.max(...block.map(l=>l.length));
+    const padded = block.map(l=>l.padEnd(width, ' '));
+    // mark[i] = true if column i is a space in all rows
+    const allSpace = [];
+    for (let i=0;i<width;i++) allSpace[i] = padded.every(l=>l[i]===' ');
+    // A column boundary is any run of all-space columns (R right-aligns columns and
+    // separates them with at least one space that stays empty across every row).
+    const segments = []; // [start, end)
+    let i=0;
+    while (i<width) {
+      if (allSpace[i]) { i++; continue; }
+      let start=i;
+      while (i<width && !allSpace[i]) i++;
+      segments.push([start, i]);
+    }
+    if (segments.length < 2) return null; // not really a table
+    const rows = padded.map(l => segments.map(([s,e]) => l.slice(s,e).trim()));
+    if (rows.length < 2) return null; // a single line is not a table
+    // Validate: at least one non-first column must be numeric in the majority of rows,
+    // otherwise this is prose that merely contains some numbers.
+    const dataRows = rows; // includes potential header; numeric check tolerates header row
+    let numericCol = false;
+    for (let c=1;c<segments.length;c++) {
+      let numeric=0, total=0;
+      for (const r of dataRows) { const v=r[c]; if (v==='') continue; total++; if (/^[-+]?\.?\d[\d.eE+-]*$/.test(v)) numeric++; }
+      if (total>=2 && numeric/total >= 0.6) { numericCol=true; break; }
+    }
+    if (!numericCol) return null;
+    // Header heuristic: first row has no leading numeric in col>=1, and contains letters.
+    const looksHeader = (r) => r.length && r.slice(1).some(c=>/[A-Za-z]/.test(c)) && !/^[-+]?\.?\d/.test(r[1]||'0');
+    const html = ['<table class="console-table">'];
+    rows.forEach((r, ri) => {
+      const tag = (ri===0 && looksHeader(r)) ? 'th' : 'td';
+      html.push('<tr>' + r.map((c,ci)=>{
+        const num = ci>0 && /^[-+]?\.?\d/.test(c);
+        return `<${tag}${num?' class="num"':''}>${escHtml(c)}</${tag}>`;
+      }).join('') + '</tr>');
+    });
+    html.push('</table>');
+    return html.join('');
+  };
+
+  const out = [];
+  let i=0;
+  while (i < lines.length) {
+    if (isTabular(lines[i])) {
+      let j=i;
+      while (j<lines.length && isTabular(lines[j])) j++;
+      let block = lines.slice(i, j);
+      let startIdx = i;
+      // If the line just above looks like a column-header (multiple words, no leading
+      // number, not ending with ':'), include it so headers align with their columns.
+      const prev = i>0 ? lines[i-1] : '';
+      const prevTrim = prev.replace(/\s+$/,'');
+      if (prevTrim && !/:\s*$/.test(prevTrim) && /\S\s{1,}\S/.test(prevTrim.trim())
+          && !/^[-+]?\.?\d/.test(prevTrim.trim()) && / {2,}\S/.test('  '+prevTrim)) {
+        // remove the header line from whatever text block was already emitted
+        if (out.length && out[out.length-1].startsWith('<pre')) {
+          const inner = out[out.length-1].replace(/^<pre class="terminal-pre">/,'').replace(/<\/pre>$/,'');
+          const decoded = inner.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+          const plines = decoded.split('\n');
+          if (plines[plines.length-1].trim() === prevTrim.trim()) {
+            plines.pop();
+            if (plines.join('').trim()) out[out.length-1] = `<pre class="terminal-pre">${escHtml(plines.join('\n'))}</pre>`;
+            else out.pop();
+            block = [prev, ...block];
+          }
+        }
+      }
+      const tbl = blockToTable(block);
+      if (tbl) out.push(tbl);
+      else out.push(`<pre class="terminal-pre">${escHtml(block.join('\n'))}</pre>`);
+      i=j;
+    } else {
+      let j=i;
+      while (j<lines.length && !isTabular(lines[j])) j++;
+      out.push(`<pre class="terminal-pre">${escHtml(lines.slice(i,j).join('\n'))}</pre>`);
+      i=j;
+    }
+  }
+  return out.join('');
 }
 function orangeCardHtml(title, message, formula='') {
   const f = formula ? `<div class="orange-formula">${escHtml(formula)}</div>` : '';
@@ -2099,11 +2240,13 @@ function App() {
   const [datasetKinds, setDatasetKinds] = useState({});
   const [datasetNotes, setDatasetNotes] = useState({});
   const [blocks, setBlocks] = useState([]);
-  const [codeTabs, setCodeTabs] = useState([{ id:'code1', name:'Code 1', code:'', savedCode:'', blockId:null }]);
+  const [codeTabs, setCodeTabs] = useState([{ id:'code1', name:'Code 1', code:'sample_data <- mtcars\nsummary(lm(mpg ~ hp+cyl, data = mtcars))', savedCode:'', blockId:null }]);
   const [activeCodeTab, setActiveCodeTab] = useState('code1');
   const [promptCodeSwapped, setPromptCodeSwapped] = useState(true);
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [terminalEntries, setTerminalEntries] = useState([]);
+  const [showTerminal, setShowTerminal] = useState(true);
+  // showTerminal=true  -> Console view (raw WebR text), shown by default
+  // showTerminal=false -> HTML view (rich table/card rendering, formerly "Results")
+  const [terminalEntries, setTerminalEntries] = useState([{ id:0, head:'[Guide] Welcome to Vibestats!', text:"1. If you are a first-time user, follow these steps to get started. You may write your request in your native language. This tool runs R directly in your browser using WebR, so no local R installation is required.\n2. To download the example dataset, copy: sample_data <- mtcars\n   paste it into the R Code pane, and click the Run button.\n3. To see the summary statistics, type: 'Show me the summary statistics for sample_data'\n   in the 'Enter prompt' box and click 'Analyze'.\n4. Analyze runs the code immediately. Use the Rcode button if you only want to generate code first, then run it from the R Code pane.\n5. Enter a prompt such as 'regress mpg on hp and cyl'. If Vibestats needs one more detail, it will ask a short coaching question before generating R code.", error:false }]);
   const [restate, setRestate] = useState('');
   const [formula, setFormula] = useState('');
   const [parseErr, setParseErr] = useState('');
@@ -2130,7 +2273,7 @@ function App() {
   const [selectionBox, setSelectionBox] = useState(null);
   const [progress, setProgress] = useState(null);
   const [openMenu, setOpenMenu] = useState(null);
-  const [themeMode, setThemeMode] = useState(localStorage.getItem('vibestats_theme') || 'dark');
+  const [themeMode, setThemeMode] = useState(localStorage.getItem('vibestats_theme') || 'light');
   const [fontScale, setFontScale] = useState(parseFloat(localStorage.getItem('vibestats_font_scale') || '1') || 1);
   const promptRef = useRef();
   const fileRef = useRef();
@@ -2227,12 +2370,7 @@ function App() {
     const b = blocksRef.current.find(x => x.id === blockId);
     if (!b) return;
     const existing = codeTabs.find(t => t.blockId === blockId);
-    if (existing) {
-      setActiveCodeTab(existing.id);
-      setModal(null);
-      pushLog({ head:`[${now()}] Block edit tab already open`, text:`Block #${b.index} is already open in ${existing.name || 'an R code tab'}.` });
-      return;
-    }
+    if (existing) { setActiveCodeTab(existing.id); setModal(null); return; }
     if (codeTabs.length >= 5) { alert('There are already 5 R code tabs open. Please close one tab first.'); return; }
     const id = 'code' + Date.now() + '_' + Math.floor(Math.random()*10000);
     const tab = { id, name:`Block#${b.index}`, code:String(b.code || ''), savedCode:String(b.code || ''), blockId:b.id };
@@ -2597,9 +2735,16 @@ ${currentCode}` });
       pushLog({ head: ts + ' — dataset created', text:`New dataset created: '${res.newDataset}'.` });
     }
     const resultLineCount = res.resultText ? res.resultText.split(/\r?\n/).length : 0;
+    // The Console pane shows this exact text for every run. To keep the HTML view in
+    // sync with the Console view, the same text is always rendered as a console card
+    // in the HTML pane (in addition to any rich table/card/plot).
+    const sameAsConsole = terminalTextFromResult(res);
+    const consoleCard = (sameAsConsole && sameAsConsole.trim() && !/^R code ran successfully\. No printed result object/.test(sameAsConsole.trim()))
+      ? `<section class="result-card"><div class="result-card-title">Console</div><pre class="terminal-pre">${escHtml(sameAsConsole.trim())}</pre></section>`
+      : '';
     let displayed = false;
     if (res.resultHtml || (res.resultText && res.resultText.trim() && resultLineCount <= 100) || res.plot) {
-      pushResult({ head: ts, text: res.resultText ? res.resultText.trim() : '', html: res.resultHtml || '', plot: res.plot || null,
+      pushResult({ head: ts, text: '', html: (res.resultHtml || '') + consoleCard, plot: res.plot || null,
                    _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey: res.resultKey || null, _outputLanguage: entryOutputLanguage });
       displayed = true;
     }
@@ -2619,7 +2764,7 @@ ${code || '(none)'}` });
       } else {
         pushLog({ head: ts + ' — console output suppressed', text:'Console output had more than 100 lines, so it was not printed. Assign large outputs to a dataset to inspect them.' });
       }
-    } else if (res.consoleText && res.consoleText.trim()) {
+    } else if (!displayed && res.consoleText && res.consoleText.trim()) {
       pushLog({ head: ts + ' — technical log', text: res.consoleText.trim() });
     }
     if (!displayed && !res.savedDataset && !(res.consoleText && res.consoleText.trim())) {
@@ -2725,6 +2870,14 @@ ${code || '(none)'}` });
 
   async function showPreview(name) {
     const sc=(window._dsCache||{})[name]; const sh=sc?sc.shape:[0,0];
+    // Lists (incl. model objects like lm/glm) open as an RStudio-style expandable tree
+    // in a new window. data.frames open as a sheet; everything else keeps R's native
+    // str()/print() representation via previewHTML.
+    const isDF = sc && (sc.kind === 'data.frame' || (Array.isArray(sc.fields) && sc.fields.length));
+    if (sc && sc.kind === 'list' && !isDF && sc.tree) {
+      setModal({ title:`${name}  (${sc.class || sc.kind || 'list'}; ${sh[0]} × ${sh[1]})`, datasetName:name, treeView:sc.tree, noEdit:true });
+      return;
+    }
     let start=1, end=Math.min(10000, sh[0] || 10000);
     if (sh[0] > 10000) {
       const ans = prompt(`${name} has ${sh[0]} rows. Enter row range to open (example: 1-10000):`, `1-10000`);
@@ -2907,6 +3060,7 @@ ${code || '(none)'}` });
     else if (kind==='blocks') setModal({ title, full:true, blocksView:true });
     else if (kind==='datasets') setModal({ title, full:true, datasetsView:true });
     else if (kind==='terminal') setModal({ title, full:true, terminalView:true });
+    else if (kind==='html') setModal({ title, full:true, htmlView:true });
     else if (kind==='rcodepane') setModal({ title, full:true, rcodePane:true });
   }
 
@@ -2973,7 +3127,12 @@ ${code || '(none)'}` });
             h('div', { className:'nl-actions' },
               h('button', { className:'nl-go action-btn primary analyze-btn', onClick:onAnalyzePrompt, disabled:busy }, busy?'…':h(React.Fragment,null,h('span',{className:'ico'},'✦'),h('span',null,'Analyze'))),
               h('button', { className:'nl-go action-btn rcode-btn', onClick:onRCodePrompt, disabled:busy, title:'Generate R code without running' }, 'Rcode'))),
-          parseErr && h('div', { className:'parse-err' }, parseErr))));
+          parseErr && h('div', { className:'parse-err' }, parseErr),
+          coach && h('div', { className:'coach-box' },
+            h('div', { className:'coach-title' }, coach.title || uiTextForLanguage('coach', coach.original || coach.message || '')),
+            h('div', { className:'coach-msg' }, coach.message),
+            coach.options && coach.options.length ? h('div', { className:'coach-options' },
+              coach.options.map((op,i)=>h('button', { key:i, onClick:()=>onCoachOption(op) }, op))) : null))));
   }
 
   function renderCodeTabs(includeActions=false) {
@@ -3026,6 +3185,19 @@ ${code || '(none)'}` });
         : h('span', { className:'placeholder' }, 'Raw WebR console output will appear here after running R code.'));
   }
 
+  // HTML view = the exact same content as the Console view, rendered as HTML.
+  // It reads from the same terminalEntries source, so the two views are always identical
+  // in content; only the presentation (a styled HTML block vs. the raw console block) differs.
+  function renderHtmlPane() {
+    return h('div', { className:'stream html-stream' },
+      terminalEntries.length ? terminalEntries.map(en => h('div', { key:en.id, className:'entry' + (en.error ? ' err' : '') },
+        h('div', { className:'ehead' }, en.head),
+        h('div', { className:'result-html result-html-wrap' + (en.error ? ' err' : '') },
+          h('div', { dangerouslySetInnerHTML:{ __html: consoleTextToHtml(en.text || '(empty)') } })),
+        en.code && h('details', { className:'technical-log' }, h('summary', null, 'Executed code'), h('pre', null, en.code))))
+        : h('span', { className:'placeholder' }, 'The HTML view shows the same console output, with numeric blocks arranged into tables.'));
+  }
+
   const lowerLeftPane = promptCodeSwapped ? renderRCodePane() : renderPromptPane();
   const lowerRightPane = promptCodeSwapped ? renderPromptPane() : renderRCodePane();
 
@@ -3074,13 +3246,13 @@ ${code || '(none)'}` });
       h('div', { className:'vsplit', style:{flex:'1 1 auto'} },
         h('div', { className:'hsplit', style:{flex:'1 1 auto'} },
           h('div', { className:'window', style:{flex:'1 1 58%'} },
-            h('div', { className:'titlebar' }, h('span',{className:'dot'}), showTerminal ? 'Console' : 'Results',
+            h('div', { className:'titlebar' }, h('span',{className:'dot'}), showTerminal ? 'Console' : 'HTML',
               h('span',{className:'grow'}),
-              h('button',{className:'tbtn text-tbtn' + (showTerminal ? ' active' : ''), title:'Show raw WebR console output', onClick:()=>setShowTerminal(v=>!v)},'Console'),
-              h('button',{className:'tbtn', title:'Clear', onClick:()=>showTerminal ? setTerminalEntries([]) : setResultEntries([])},'⌫'),
-              h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen(showTerminal ? 'Console' : 'Results', showTerminal ? 'terminal' : 'result')},'⛶')),
+              h('button',{className:'tbtn text-tbtn' + (!showTerminal ? ' active' : ''), title:'Show rendered HTML view of the same result', onClick:()=>setShowTerminal(v=>!v)},'HTML'),
+              h('button',{className:'tbtn', title:'Clear', onClick:()=>setTerminalEntries([])},'⌫'),
+              h('button',{className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen(showTerminal ? 'Console' : 'HTML', showTerminal ? 'terminal' : 'html')},'⛶')),
             h('div', { className:'content' },
-              showTerminal ? renderTerminalPane() : h(StreamPane, { entries:resultEntries, kind:'result', onInterpret:onInterpretResult, onSavePdf:onSavePdf, onCoachOption:onCoachOption, onToDataset:onToDataset }))),
+              showTerminal ? renderTerminalPane() : renderHtmlPane())),
           h('div', { className:'gutter col', onMouseDown:e=>onSplit(e,'h','next') }),
           h('div', { className:'window', style:{flex:'0 0 360px'} },
             h('div', { className:'titlebar' }, h('span',{className:'dot'}), 'Blocks',
@@ -3100,8 +3272,8 @@ ${code || '(none)'}` });
           lowerRightPane)) ),
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
-      h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }}, '✎'), modal.blockInfo && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }}, '✎'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▶'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
+      h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : modal.treeView ? {width:'min(680px,88vw)', height:'min(620px,82vh)'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
+        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && !modal.noEdit && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }}, '✎'), modal.blockInfo && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }}, '✎'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▶'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
         modal.noteDataset ? h('div',{className:'mbody'},
             h('div',{className:'note-pane'},
               h('div',{className:'note-title'}, modal.noteDataset),
@@ -3124,9 +3296,12 @@ ${code || '(none)'}` });
               h('textarea',{className:'code-edit', value:modal.code || '', spellCheck:false, onChange:e=>setModal(m=>({...m,code:e.target.value}))}),
               h('div',{className:'mfoot', style:{padding:'8px 0 0', borderTop:'none'}},
                 h('button',{onClick:()=>saveBlockEditor(modal.blockEdit, {userMemo:modal.userMemo, summary:modal.summary, formula:modal.formula, code:modal.code})},'Save'))))
+          : modal.treeView ? h('div',{className:'mbody'},
+            h('div',{className:'tree-pane'}, renderDatasetTree(modal.treeView, true)))
           : modal.productInfo ? h('div',{className:'mbody'}, h(ProductInfo))
           : modal.streamKind ? h('div',{className:'mbody',style:{padding:0}}, h(StreamPane,{entries:modal.entries, kind:modal.streamKind, onInterpret: modal.streamKind==='result'?onInterpretResult:null, onSavePdf: modal.streamKind==='result'?onSavePdf:null, onCoachOption:onCoachOption, onToDataset: modal.streamKind==='result'?onToDataset:null}))
           : modal.terminalView ? h('div',{className:'mbody',style:{padding:0}}, renderTerminalPane())
+          : modal.htmlView ? h('div',{className:'mbody',style:{padding:0}}, renderHtmlPane())
           : modal.datasetsView ? h('div',{className:'mbody',style:{padding:0, display:'flex', flexDirection:'column'}},
             h('div', { className:'ds-toolbar' },
               h('button', { className:'load-btn action-btn primary', onClick:()=>fileRef.current.click(), title:'Import dataset' }, h('span',{className:'ico'},'⬆'), h('span',null,'Import')),
@@ -3164,9 +3339,9 @@ ${code || '(none)'}` });
         : ctx.kind==='dataset-empty'
           ? [ h('div',{key:1,className:'item', onClick:()=>{ newBlankDataset(); setCtx(null); }},h('span',{className:'ico'},'＋'),'New dataset') ]
         : ctx.kind==='datasets-selected'
-          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }}, h('span',{className:'ico'},'🗑'), `Delete ${selectedDatasets.length} datasets`) ]
+          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ onDeleteSelectedDatasets(); setCtx(null); }},`Delete ${selectedDatasets.length} datasets`) ]
         : ctx.kind==='blocks-selected'
-          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }}, h('span',{className:'ico'},'🗑'), `Delete ${selectedIds.length} blocks`) ]
+          ? [ h('div',{key:1,className:'item danger', onClick:()=>{ deleteSelectedBlocks(); setCtx(null); }},`Delete ${selectedIds.length} blocks`) ]
           : [ h('div',{key:1,className:'item', onClick:()=>{ openBlockInRCodeTab(ctx.id); setCtx(null); }}, h('span',{className:'ico'},'✎'), 'Edit mode'),
               h('div',{key:2,className:'item danger', onClick:()=>{ if (selectedIds.length > 1 && selectedIds.includes(ctx.id)) deleteSelectedBlocks(); else deleteBlock(ctx.id); setCtx(null); }}, h('span',{className:'ico'},'🗑'), selectedIds.length > 1 && selectedIds.includes(ctx.id) ? `Delete ${selectedIds.length} blocks` : 'Delete block') ])
   );
@@ -3290,16 +3465,24 @@ function blockSquare(b, activeId, selectedIds, fns) {
 }
 
 
-function renderDatasetTree(node) {
+function renderDatasetTree(node, topOpen=false) {
   if (!node) return null;
   const children = Array.isArray(node.children) ? node.children : [];
   const label = node.label || node.name || 'object';
-  if (!children.length) return h('div', { className:'leaf', title:label }, label);
-  return h('details', { open:false, title:label },
-    h('summary', null, label),
+  const value = node.value || '';
+  if (!children.length) {
+    return h('div', { className:'tree-row leaf', title: value ? (label + '  =  ' + value) : label },
+      h('span', { className:'tree-label' }, label),
+      value ? h('span', { className:'tree-value', title:value }, value) : null);
+  }
+  return h('details', { open:topOpen, title:label },
+    h('summary', null,
+      h('span', { className:'tree-label' }, label),
+      value ? h('span', { className:'tree-value', title:value }, value) : null),
     children.map((ch, i) => h(React.Fragment, { key:(ch.name || 'node') + i }, renderDatasetTree(ch)))
   );
 }
+
 function dsItem(n, info, kind, selected, fns) {
   const clickOpen = (e) => {
     if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); fns.setSelectedDatasets(ds=>ds.includes(n)?ds.filter(x=>x!==n):[...ds,n]); return; }
@@ -3312,8 +3495,7 @@ function dsItem(n, info, kind, selected, fns) {
     onDoubleClick:e=>{ e.preventDefault(); e.stopPropagation(); fns.showPreview(n); },
     onContextMenu:e=>{ e.preventDefault(); if (selected) fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); else { fns.setSelectedDatasets([]); fns.setCtx({x:e.clientX,y:e.clientY,kind:'dataset',name:n}); } } },
     h('div',{className:'nm', title:n}, n),
-    h('div',{className:'dim'}, `${info.kind || 'object'} · ${info.shape[0]} × ${info.shape[1]}`),
-    info.tree && (info.kind === 'list' || (info.tree.children && info.tree.children.length)) ? h('div', { className:'ds-tree', onClick:e=>e.stopPropagation(), onDoubleClick:e=>e.stopPropagation(), onMouseDown:e=>e.stopPropagation() }, renderDatasetTree(info.tree)) : null,
+    h('div',{className:'dim', title:(info.class || info.kind || 'object')}, `${info.class || info.kind || 'object'} · ${info.shape[0]} × ${info.shape[1]}`),
     h('div',{className:'ds-actions'},
       h('button',{className:'ds-ico', title:'Preview', onMouseDown:stop, onClick:e=>{stop(e); fns.showPreview(n);}}, '◉'),
       h('button',{className:'ds-ico note-btn', title:'Memo', onMouseDown:stop, onClick:e=>{stop(e); fns.openDatasetNote(n);}}, (fns.datasetNotes && fns.datasetNotes[n]) ? '📝' : '✎'),
