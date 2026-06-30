@@ -1234,17 +1234,33 @@ async function executeR(code, allowNewDatasets=false) {
   # or a base-graphics call); we never re-plot leftover objects from earlier runs.
   .drew_plot <- FALSE
   .detect_ok <- TRUE
+  .warnings <- character(0)
+  .format_warning <- function(w) {
+    .msg <- conditionMessage(w)
+    .call <- conditionCall(w)
+    if (!is.null(.call)) {
+      .call_txt <- paste(deparse(.call), collapse=" ")
+      paste0("Warning in ", .call_txt, " : ", .msg)
+    } else {
+      paste0("Warning: ", .msg)
+    }
+  }
   .console <- capture.output({
-    grDevices::png(.plotpattern, width=720, height=480, res=96)
-    try(grDevices::dev.control(displaylist="enable"), silent=TRUE)
-    .eval_out <- withVisible(eval(parse(text=.code), envir=.env))
-    # Detect whether anything was actually drawn on the current device. An untouched
-    # device has an empty display list; in that case we must NOT keep its (blank) PNG.
-    .drew_plot <- tryCatch({
-      .rp <- grDevices::recordPlot()
-      .dl <- .rp[[1]]
-      is.list(.dl) && length(.dl) > 0L
-    }, error=function(e) { .detect_ok <<- FALSE; FALSE })
+    withCallingHandlers({
+      grDevices::png(.plotpattern, width=720, height=480, res=96)
+      try(grDevices::dev.control(displaylist="enable"), silent=TRUE)
+      .eval_out <- withVisible(eval(parse(text=.code), envir=.env))
+      # Detect whether anything was actually drawn on the current device. An untouched
+      # device has an empty display list; in that case we must NOT keep its (blank) PNG.
+      .drew_plot <- tryCatch({
+        .rp <- grDevices::recordPlot()
+        .dl <- .rp[[1]]
+        is.list(.dl) && length(.dl) > 0L
+      }, error=function(e) { .detect_ok <<- FALSE; FALSE })
+    }, warning=function(w) {
+      .warnings <<- c(.warnings, .format_warning(w))
+      invokeRestart("muffleWarning")
+    })
   })
   try({ while (grDevices::dev.cur() > 1L) grDevices::dev.off() }, silent=TRUE)
   .png_after <- .list_pngs()
@@ -1281,7 +1297,11 @@ async function executeR(code, allowNewDatasets=false) {
   } else if (!is.null(.eval_out) && isTRUE(.eval_out$visible)) {
     result <- .eval_out$value
   }
-  .resultText <- ""; .resultHtml <- ""; .consoleText <- paste(.console, collapse="\\n"); .terminalText <- ""; .savedNames <- character(0); .resultKey <- ""
+  .warningText <- ""
+  if (length(.warnings)) .warningText <- paste(c("Warning message(s):", .warnings), collapse="\\n")
+  .consoleTextRaw <- c(.console, .warningText)
+  .consoleTextRaw <- .consoleTextRaw[nzchar(.consoleTextRaw)]
+  .resultText <- ""; .resultHtml <- ""; .consoleText <- paste(.consoleTextRaw, collapse="\\n"); .terminalText <- ""; .savedNames <- character(0); .resultKey <- ""
   .esc_html <- function(x) {
     x <- as.character(x); x[is.na(x)] <- ""
     x <- gsub("&", "&amp;", x, fixed=TRUE)
@@ -1362,7 +1382,9 @@ async function executeR(code, allowNewDatasets=false) {
     .resultHtml <- .obj_html(result, "Result")
     if (!nzchar(.resultHtml) && .lineCount <= 100L) .resultText <- paste(.printed, collapse="\\n")
   }
-  .terminalText <- paste(c(.console, .printed), collapse="\\n")
+  .terminalTextRaw <- c(.console, .printed, .warningText)
+  .terminalTextRaw <- .terminalTextRaw[nzchar(.terminalTextRaw)]
+  .terminalText <- paste(.terminalTextRaw, collapse="\\n")
   paste0("__RESULT__", .resultText, "__HTML__", .resultHtml, "__CONSOLE__", .consoleText, "__TERMINAL__", .terminalText, "__SAVED__", paste(.savedNames, collapse=","), "__PLOT__", .plotPath, "__RKEY__", .resultKey)
 }
 .vibestats_out <- tryCatch(.vibestats_run(), error=function(e) paste0("__ERR__", conditionMessage(e)))
