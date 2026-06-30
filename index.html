@@ -1225,28 +1225,24 @@ async function executeR(code, allowNewDatasets=false) {
       if (dir.exists(d)) list.files(d, pattern="[.]png$", full.names=TRUE) else character(0)
     }), use.names=FALSE))
   }
-  .png_before <- .list_pngs()
   .old_internal <- list.files("/tmp", pattern="^__vibestats_plot.*[.]png$", full.names=TRUE)
   if (length(.old_internal)) try(unlink(.old_internal), silent=TRUE)
+  .png_before <- .list_pngs()
   .eval_out <- NULL
+  # Run ONLY the user's code. Nothing is appended, re-run, or auto-printed.
+  # A plot appears only if the user's own code draws one (e.g. an explicit print(p)
+  # or a base-graphics call); we never re-plot leftover objects from earlier runs.
   .console <- capture.output({
     grDevices::png(.plotpattern, width=720, height=480, res=96)
     .eval_out <- withVisible(eval(parse(text=.code), envir=.env))
-    if (exists("p", envir=.env, inherits=FALSE)) {
-      .p <- get("p", envir=.env, inherits=FALSE)
-      .plot_classes <- c("ggplot", "ggplot2::ggplot", "trellis", "grob", "gTree", "recordedplot")
-      if (inherits(.p, .plot_classes)) {
-        if (grDevices::dev.cur() == 1L) grDevices::png(.plotpattern, width=720, height=480, res=96)
-        print(.p)
-      }
-    }
   })
   try({ while (grDevices::dev.cur() > 1L) grDevices::dev.off() }, silent=TRUE)
   .png_after <- .list_pngs()
+  # Only PNGs that did not exist before this run are eligible. We do NOT blindly
+  # include the fixed .plotfile path, so a stale image from a previous run can never
+  # be picked up.
   .new_pngs <- setdiff(.png_after, .png_before)
-  .internal_pngs <- list.files("/tmp", pattern="^__vibestats_plot.*[.]png$", full.names=TRUE)
-  .plot_candidates <- unique(c(.new_pngs, .internal_pngs, .plotfile))
-  .plot_candidates <- .plot_candidates[file.exists(.plot_candidates)]
+  .plot_candidates <- .new_pngs[file.exists(.new_pngs)]
   .plot_sizes <- suppressWarnings(file.info(.plot_candidates)$size)
   .valid <- which(!is.na(.plot_sizes) & .plot_sizes > 500)
   .plotPath <- ""
