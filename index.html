@@ -1232,17 +1232,41 @@ async function executeR(code, allowNewDatasets=false) {
   # Run ONLY the user's code. Nothing is appended, re-run, or auto-printed.
   # A plot appears only if the user's own code draws one (e.g. an explicit print(p)
   # or a base-graphics call); we never re-plot leftover objects from earlier runs.
+  .drew_plot <- FALSE
+  .detect_ok <- TRUE
   .console <- capture.output({
     grDevices::png(.plotpattern, width=720, height=480, res=96)
+    try(grDevices::dev.control(displaylist="enable"), silent=TRUE)
     .eval_out <- withVisible(eval(parse(text=.code), envir=.env))
+    # Detect whether anything was actually drawn on the current device. An untouched
+    # device has an empty display list; in that case we must NOT keep its (blank) PNG.
+    .drew_plot <- tryCatch({
+      .rp <- grDevices::recordPlot()
+      .dl <- .rp[[1]]
+      is.list(.dl) && length(.dl) > 0L
+    }, error=function(e) { .detect_ok <<- FALSE; FALSE })
   })
   try({ while (grDevices::dev.cur() > 1L) grDevices::dev.off() }, silent=TRUE)
   .png_after <- .list_pngs()
-  # Only PNGs that did not exist before this run are eligible. We do NOT blindly
-  # include the fixed .plotfile path, so a stale image from a previous run can never
-  # be picked up.
+  # Only PNGs that did not exist before this run are eligible, AND only if the user's
+  # code actually produced a plot. Otherwise delete the blank device file so an empty
+  # image is never shown. If display-list detection failed, fall back to a size cutoff
+  # high enough that a blank 720x480 white PNG cannot pass.
   .new_pngs <- setdiff(.png_after, .png_before)
-  .plot_candidates <- .new_pngs[file.exists(.new_pngs)]
+  .new_pngs <- .new_pngs[file.exists(.new_pngs)]
+  .new_sizes <- suppressWarnings(file.info(.new_pngs)$size)
+  if (isTRUE(.drew_plot)) {
+    .plot_candidates <- .new_pngs
+  } else if (!isTRUE(.detect_ok)) {
+    # Unreliable detection: keep only clearly-non-blank images (> 8 KB).
+    .keep <- which(!is.na(.new_sizes) & .new_sizes > 8000)
+    .plot_candidates <- .new_pngs[.keep]
+    .drop <- setdiff(.new_pngs, .plot_candidates)
+    if (length(.drop)) try(unlink(.drop), silent=TRUE)
+  } else {
+    if (length(.new_pngs)) try(unlink(.new_pngs), silent=TRUE)
+    .plot_candidates <- character(0)
+  }
   .plot_sizes <- suppressWarnings(file.info(.plot_candidates)$size)
   .valid <- which(!is.na(.plot_sizes) & .plot_sizes > 500)
   .plotPath <- ""
