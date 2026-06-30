@@ -2605,7 +2605,6 @@ function App() {
     setActiveId(id);
     dispatchOutput(rr.res, `#${index} ${rr.summary||generatedSummary||''}`.trim(), rr.code, rr.formula || generatedFormula || '', false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
     hideProgress(); setBusy(false);
   }
 
@@ -2637,8 +2636,7 @@ function App() {
           setBlocks(bs => [...bs, block]);
           setActiveId(id);
           dispatchOutput(rr.res, `#${index} ${rr.summary||a.summary||''}`.trim(), rr.code, rr.formula || a.formula || '', false, outputLanguageInstruction(text));
-          if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
-        }
+              }
       }
     }
     catch(e){
@@ -2661,53 +2659,33 @@ function App() {
     setTimeout(()=>onRCodePrompt(), 0);
   }
 
+  function formatRConsoleError(err) {
+    const msg = cleanErrorMessage(err);
+    return /^Error:/i.test(msg) ? msg : 'Error: ' + msg;
+  }
+
   async function runCodeCore(code, allowNewDatasets=false) {
     try {
       const res = await executeR(code, allowNewDatasets);
       pushTerminal(code, terminalTextFromResult(res) || '(no WebR console output)', false, res.plot || null);
       return res;
     } catch(e) {
-      const msg = e.message || String(e);
+      // Show the same error text that a normal R console would show.
+      // Do not repair, rewrite, or retry the user's code here.
+      const msg = formatRConsoleError(e.message || String(e));
       pushTerminal(code, msg, true);
-      return { error: msg };
+      return { error: msg, consoleText: msg, terminalText: msg };
     }
   }
 
   async function runCodeWithRepair(initialCode, summary, allowNewDatasets=false) {
-    let currentCode = initialCode, currentSummary = summary, currentFormula = formula;
-    let res = null;
-    for (let attempt=1; attempt<=5; attempt++) {
-      showProgress(attempt===1 ? 'Running R code…' : `Repairing and retrying R code (${attempt}/5)…`, Math.min(88, 15 + attempt*14), 'If an error occurs, the code is automatically repaired and retried up to 5 times.');
-      res = await runCodeCore(currentCode, allowNewDatasets);
-      if (!res.error) return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:attempt>1 };
-      if (isDataReferenceError(res.error)) {
-        const msg = dataReferenceMessage(res.error);
-        setParseErr(msg);
-        return { res:{ error: msg }, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:false, noRepair:true };
-      }
-      const msg = cleanErrorMessage(res.error);
-      setParseErr(`An error occurred. Automatic repair attempt ${attempt}/5\n${msg}`);
-      pushLog({ head:`[${now()}] auto-repair ${attempt}/5`, error:true, text:msg });
-      if (attempt===5) break;
-      try {
-        const beforeCode = currentCode;
-        const fixed = await repairRCode(currentCode, currentSummary, res.error, attempt+1);
-        currentCode = fixed.code; currentSummary = fixed.summary || currentSummary; currentFormula = fixed.formula || currentFormula;
-        setCodeText(currentCode); setRestate(currentSummary); setFormula(currentFormula);
-        pushLog({ head:`[${now()}] code repaired ${attempt}/5`, text: `${fixed.reason || 'Code was revised automatically.'}
-
---- Original code ---
-${beforeCode}
-
---- Repaired code ---
-${currentCode}` });
-      } catch(repairErr) {
-        res = { error: 'Auto-repair failed: ' + (repairErr.message || repairErr) };
-        setParseErr(`An error occurred and automatic repair failed.\n${cleanErrorMessage(res.error)}`);
-        break;
-      }
-    }
-    return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:true };
+    const currentCode = initialCode;
+    const currentSummary = summary;
+    const currentFormula = formula;
+    showProgress('Running R code…', 45, 'Errors are shown exactly as R console errors. Automatic code repair/retry is disabled.');
+    const res = await runCodeCore(currentCode, allowNewDatasets);
+    if (res.error) setParseErr(formatRConsoleError(res.error));
+    return { res, code:currentCode, summary:currentSummary, formula:currentFormula, repaired:false };
   }
 
   async function onRunOnly() {
@@ -2719,7 +2697,6 @@ ${currentCode}` });
     const rr = await runCodeWithRepair(code, restate || code.split('\n')[0].slice(0,40), shouldAllowDatasetCreation(intentText) || shouldAllowDirectRDatasetSave(code));
     await refreshSchema();
     dispatchOutput(rr.res, rr.summary || code.split('\n')[0].slice(0,40), rr.code, rr.formula || formula, false, outputLanguageInstruction(intentText));
-    if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
     hideProgress(); setBusy(false);
   }
 
@@ -2739,7 +2716,6 @@ ${currentCode}` });
     setActiveId(id);
     dispatchOutput(rr.res, `#${index} ${rr.summary||''}`.trim(), rr.code, rr.formula || formula, false, outputLanguageInstruction(intentText));
     if (!rr.res.error && rr.res.newDataset) setNewNames(p=>p.includes(rr.res.newDataset)?p:[...p,rr.res.newDataset]);
-    if (rr.repaired && !rr.res.error) setParseErr('The error was automatically repaired and the code ran successfully. The repaired code has been reflected in the R Code pane.');
     hideProgress(); setBusy(false);
   }
 
@@ -2747,7 +2723,12 @@ ${currentCode}` });
     const entryOutputLanguage = outputLanguage || outputLanguageInstruction((head || '') + '\n' + (runFormula || ''));
     const ts = `[${now()}] ${head}`;
     if (res.error) {
-      pushLog({ head: ts + ' — FAILED', error:true, text: cleanErrorMessage(res.error) });
+      const errorText = formatRConsoleError(res.error);
+      const errorHtml = `<section class="error-card"><div class="result-card-title">Console Error</div><pre class="terminal-pre err">${escHtml(errorText)}</pre></section>`;
+      // Results pane and Console pane now show the same R-console-style error text.
+      pushResult({ head: ts + ' — FAILED', text: errorText, html: errorHtml, plot:null,
+                   _code: code, _summary: head, _formula: runFormula || '', _isDetail: !!isDetail, resultKey:null, _outputLanguage: entryOutputLanguage, error:true });
+      pushLog({ head: ts + ' — FAILED', error:true, text: errorText });
       return;
     }
     if (res.newDataset && res.newDataset !== res.savedDataset && !String(res.savedDataset || '').split(',').includes(res.newDataset)) {
@@ -3166,7 +3147,7 @@ ${code || '(none)'}` });
       h('button', { className:'tab-control-btn tab-save-btn', onClick:saveActiveCodeTab, title:'Save the active R code tab as a Block' }, 'Save'),
       h('span', { className:'grow' }),
       includeActions && h('div', { className:'rcode-right-actions' },
-        h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and automatically save this step as a block' }, '▶'),
+        h('button', { className:'tbtn rcode-run', 'data-run-rcode':'1', onClick:onRunBlock, disabled:busy, title:'Run R code and save this step as a block' }, '▶'),
         h('button', { className:'tbtn', title:'Fullscreen', onClick:()=>fullscreen('R Code','rcodepane') }, '⛶')));
   }
 
@@ -3300,7 +3281,7 @@ ${code || '(none)'}` });
 
     modal && h('div', { className:'modal-bg', onClick:e=>{ if(e.target.className==='modal-bg') setModal(null); } },
       h('div', { className:'modal'+(modal.full?' full':'')+(modal.rcodePane?' rcode-modal':''), style: modal.noteDataset ? {left:'72vw', width:'430px', height:'560px'} : modal.treeView ? {width:'min(680px,88vw)', height:'min(620px,82vh)'} : ((modal.datasetEdit || modal.newDataset) ? {width:'min(980px,90vw)', height:'min(720px,86vh)'} : null) },
-        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && !modal.noEdit && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }}, '✎'), modal.blockInfo && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }}, '✎'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and automatically save this step as a block' }, '▶'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
+        h('h3', { onMouseDown:beginModalDrag }, h('span',{className:'mtitle'}, modal.title), modal.datasetName && !modal.datasetEdit && !modal.noEdit && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openDatasetEditor(modal.datasetName); }}, '✎'), modal.blockInfo && h('button',{className:'modal-edit-btn', title:'Modify', onClick:e=>{ e.stopPropagation(); openBlockEditor(modal.blockInfo); }}, '✎'), modal.rcodePane && h('button', { className:'max rcode-run', 'data-run-rcode':'1', onClick:e=>{ e.stopPropagation(); onRunBlock(); }, title:'Run R code and save this step as a block' }, '▶'), h('button',{className:'max', onClick:e=>{ e.stopPropagation(); setModal(m=>({...m, full:!m.full})); }}, modal.full?'▣':'⛶'), h('span',{className:'x', onClick:()=>setModal(null)},'✕')),
         modal.noteDataset ? h('div',{className:'mbody'},
             h('div',{className:'note-pane'},
               h('div',{className:'note-title'}, modal.noteDataset),
